@@ -72,10 +72,16 @@ export function AppShell({
   const handleLogout = async () => {
     setIsLoggingOut(true)
     try {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('teachai_session_data_v2')
+      }
       await fetch('/api/auth/logout', { method: 'POST' })
       router.push('/login')
       router.refresh()
     } catch {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('teachai_session_data_v2')
+      }
       router.push('/login')
     }
   }

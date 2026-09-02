@@ -15,11 +15,13 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { useAppSession } from '@/lib/session-context'
 
 function TeacherLoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const redirectPath = searchParams.get('redirect') || '/teacher'
+  const { syncAuthenticatedUser } = useAppSession()
 
   const [email, setEmail] = React.useState('')
   const [password, setPassword] = React.useState('')
@@ -49,6 +51,10 @@ function TeacherLoginForm() {
       if (!res.ok || !data.success) {
         setErrorMessage(data.error || 'Invalid email or password.')
         return
+      }
+
+      if (data.user && syncAuthenticatedUser) {
+        syncAuthenticatedUser(data.user)
       }
 
       router.push(redirectPath)

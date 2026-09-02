@@ -33,6 +33,18 @@ import {
   generateRecommendations as aiGenerateRecommendations,
 } from './ai-service'
 
+export interface StudentUserProfile {
+  id?: string
+  name: string
+  email: string
+  role?: string
+  institutionName?: string
+  level: LearningLevel
+  currentSubject: string
+  currentTopic: string
+  streak: number
+}
+
 interface SessionState {
   materials: Material[]
   selectedTopic: string
@@ -41,7 +53,7 @@ interface SessionState {
   quizzes: Record<string, QuizQuestion[]>
   approvalStatuses: Record<string, ApprovalStatus>
   students: Student[]
-  studentUser: typeof initialStudentUser
+  studentUser: StudentUserProfile
   studentQuizResults: QuizResult[]
   latestQuizSubmission: QuizSubmission | null
   teacherRecommendations: Recommendation[]
@@ -62,6 +74,7 @@ interface SessionContextValue extends SessionState {
   submitStudentQuiz: (topic: string, answers: Record<number, string>, questions: QuizQuestion[]) => Promise<QuizSubmission>
   assignRecommendation: (recId: string) => void
   resetToDefaults: () => void
+  syncAuthenticatedUser: (authUser: { id?: string; name?: string; email?: string; role?: string; institutionName?: string }) => void
 }
 
 const STORAGE_KEY = 'teachai_session_data_v2'
@@ -108,6 +121,47 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       console.warn('Could not save session to localStorage', e)
     }
   }, [state])
+
+  // Real-time synchronization with active server session
+  const syncAuthenticatedUser = React.useCallback(
+    (authUser: { id?: string; name?: string; email?: string; role?: string; institutionName?: string }) => {
+      if (!authUser || !authUser.name) return
+      setState((prev) => ({
+        ...prev,
+        studentUser: {
+          ...prev.studentUser,
+          id: authUser.id,
+          name: authUser.name!,
+          email: authUser.email || prev.studentUser.email,
+          role: authUser.role || prev.studentUser.role,
+          institutionName: authUser.institutionName || 'M. Kumarasamy College of Engineering',
+        },
+      }))
+    },
+    [],
+  )
+
+  // Fetch real authenticated session from /api/auth/me on mount
+  React.useEffect(() => {
+    let isMounted = true
+    async function loadRealSession() {
+      try {
+        const res = await fetch('/api/auth/me')
+        if (res.ok) {
+          const data = await res.json()
+          if (data.authenticated && data.user && isMounted) {
+            syncAuthenticatedUser(data.user)
+          }
+        }
+      } catch {
+        // Graceful in offline demo mode
+      }
+    }
+    loadRealSession()
+    return () => {
+      isMounted = false
+    }
+  }, [syncAuthenticatedUser])
 
   const setSelectedTopic = (topic: string) => {
     setState((prev) => ({ ...prev, selectedTopic: topic }))
@@ -525,6 +579,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         submitStudentQuiz,
         assignRecommendation,
         resetToDefaults,
+        syncAuthenticatedUser,
       }}
     >
       {children}

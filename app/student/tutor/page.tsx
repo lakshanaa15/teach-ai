@@ -38,11 +38,12 @@ function TutorContent() {
   const searchParams = useSearchParams()
   const initialPrompt = searchParams.get('prompt')
 
+  const studentFirstName = (studentUser.name || 'there').split(' ')[0]
   const [messages, setMessages] = React.useState<ChatMessage[]>([
     {
       id: 'm-1',
       role: 'assistant',
-      content: `Hi Alex! 👋 I'm your TeachAI Socratic Tutor. I see you're currently mastering **${selectedTopic}** at a **${studentUser.level}** level.\n\nI can explain concepts simply with everyday analogies, give worked step-by-step examples, diagnose why an assessment question was tricky, or provide practice problems. What would you like to explore today?`,
+      content: `Hi ${studentFirstName}! 👋 I'm your TeachAI Socratic Tutor. I see you're currently mastering **${selectedTopic}** at a **${studentUser.level}** level.\n\nI can explain concepts simply with everyday analogies, give worked step-by-step examples, diagnose why an assessment question was tricky, or provide practice problems. What would you like to explore today?`,
     },
   ])
   const [input, setInput] = React.useState('')
