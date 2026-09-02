@@ -111,6 +111,8 @@ model Teacher {
   classes       Class[]
   materials     Material[]
   assignments   Assignment[]
+  lessonPlans   LessonPlan[]
+  quizzes       Quiz[]
 
   @@index([institutionId])
 }
@@ -154,6 +156,8 @@ model Class {
   updatedAt     DateTime     @updatedAt
 
   enrollments   Enrollment[]
+  lessonPlans   LessonPlan[]
+  quizzes       Quiz[]
 
   @@index([classCode])
   @@index([teacherId])
@@ -252,12 +256,52 @@ model Assignment {
   @@index([topic])
 }
 
+model LessonPlan {
+  id                String         @id @default(cuid())
+  title             String
+  subject           String
+  grade             String
+  topic             String
+  learningObjective String         @db.Text
+  duration          String
+  curriculum        String
+  source            String?        @db.Text
+  status            ApprovalStatus @default(Draft)
+  content           Json
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  teacherId String?
+  teacher   Teacher? @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+
+  classId   String?
+  class     Class?   @relation(fields: [classId], references: [id], onDelete: SetNull)
+
+  @@index([teacherId])
+  @@index([classId])
+  @@index([topic])
+}
+
 model Quiz {
-  id         String        @id @default(cuid())
-  title      String
-  topic      String
-  difficulty LearningLevel @default(Standard)
-  createdAt  DateTime      @default(now())
+  id                String         @id @default(cuid())
+  title             String
+  subject           String?
+  grade             String?
+  topic             String
+  learningObjective String?        @db.Text
+  duration          String?
+  curriculum        String?
+  source            String?        @db.Text
+  difficulty        LearningLevel  @default(Standard)
+  status            ApprovalStatus @default(Draft)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @default(now()) @updatedAt
+
+  teacherId String?
+  teacher   Teacher? @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+
+  classId   String?
+  class     Class?   @relation(fields: [classId], references: [id], onDelete: SetNull)
 
   materialId String?
   material   Material? @relation(fields: [materialId], references: [id], onDelete: SetNull)
@@ -265,6 +309,8 @@ model Quiz {
   questions   QuizQuestion[]
   submissions QuizSubmission[]
 
+  @@index([teacherId])
+  @@index([classId])
   @@index([topic])
 }
 
@@ -278,6 +324,8 @@ model QuizQuestion {
   answer      String
   explanation String       @db.Text
   concept     String?
+  difficulty  String?      @default("Standard")
+  marks       Int          @default(1)
 
   @@index([quizId])
 }

@@ -74,7 +74,7 @@ export default function TeacherDashboard() {
     fetch('/api/classes')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data?.success && data.classes?.length > 0) {
+        if (data?.success && Array.isArray(data.classes)) {
           setClasses(data.classes)
         }
       })

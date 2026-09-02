@@ -56,22 +56,14 @@ export default function StudentDashboard() {
     type: 'success' | 'error'
     message: string
   } | null>(null)
-  const [enrolledClasses, setEnrolledClasses] = React.useState<EnrolledClass[]>([
-    {
-      id: 'cls-1',
-      name: 'DBMS - III CSE A',
-      classCode: 'DBMS3A26',
-      subject: 'Database Management Systems',
-      teacherName: 'Dr. Priya Menon',
-    },
-  ])
+  const [enrolledClasses, setEnrolledClasses] = React.useState<EnrolledClass[]>([])
 
   // Fetch student enrolled classes
   React.useEffect(() => {
     fetch('/api/classes/enrolled')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data?.success && data.classes?.length > 0) {
+        if (data?.success && Array.isArray(data.classes)) {
           setEnrolledClasses(data.classes)
         }
       })
@@ -106,10 +98,7 @@ export default function StudentDashboard() {
       })
       if (data.class) {
         setEnrolledClasses((prev) => [
-          {
-            ...data.class,
-            teacherName: 'Dr. Priya Menon',
-          },
+          data.class,
           ...prev.filter((c) => c.id !== data.class.id),
         ])
       }
@@ -229,7 +218,7 @@ export default function StudentDashboard() {
                       <p className="text-xs text-muted-foreground">{cls.subject || 'Computer Science'}</p>
                     </div>
                     <div className="mt-3 flex items-center justify-between border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
-                      <span>Teacher: {cls.teacherName || 'Dr. Priya Menon'}</span>
+                      <span>Teacher: {cls.teacherName || 'Teacher unavailable'}</span>
                       <Badge variant="default" className="text-[10px]">
                         Enrolled
                       </Badge>

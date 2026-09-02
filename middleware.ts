@@ -56,8 +56,8 @@ export async function middleware(request: NextRequest) {
   // Public authentication routes
   const isAuthRoute =
     pathname === '/login' ||
-    pathname === '/student/login' ||
-    pathname === '/teacher/login' ||
+    pathname === '/student-login' ||
+    pathname === '/teacher-login' ||
     pathname.startsWith('/register')
 
   const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME)
@@ -69,13 +69,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL(destination, request.url))
   }
 
-  // Protect Teacher routes (/teacher/*)
-  if (pathname.startsWith('/teacher')) {
-    // Exception for /teacher/login
-    if (pathname === '/teacher/login') return NextResponse.next()
-
+  // Protect Teacher routes (/teacher and /teacher/*)
+  if (pathname === '/teacher' || pathname.startsWith('/teacher/')) {
     if (!session) {
-      const loginUrl = new URL('/teacher/login', request.url)
+      const loginUrl = new URL('/teacher-login', request.url)
       loginUrl.searchParams.set('redirect', pathname)
       return NextResponse.redirect(loginUrl)
     }
@@ -85,13 +82,10 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // Protect Student routes (/student/*)
-  if (pathname.startsWith('/student')) {
-    // Exception for /student/login
-    if (pathname === '/student/login') return NextResponse.next()
-
+  // Protect Student routes (/student and /student/*)
+  if (pathname === '/student' || pathname.startsWith('/student/')) {
     if (!session) {
-      const loginUrl = new URL('/student/login', request.url)
+      const loginUrl = new URL('/student-login', request.url)
       loginUrl.searchParams.set('redirect', pathname)
       return NextResponse.redirect(loginUrl)
     }
@@ -106,8 +100,12 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
+    '/teacher',
     '/teacher/:path*',
+    '/teacher-login',
+    '/student',
     '/student/:path*',
+    '/student-login',
     '/login',
     '/register/:path*',
   ],

@@ -27,7 +27,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Avatar } from '@/components/ui/avatar'
 import { LevelBadge } from '@/components/shared/badges'
-import { askTutor } from '@/lib/ai-service'
 import { useAppSession } from '@/lib/session-context'
 import type { ChatMessage } from '@/lib/types'
 import { useToast } from '@/components/shared/toast'
@@ -77,13 +76,53 @@ function TutorContent() {
     setIsTyping(true)
 
     try {
-      const reply = await askTutor(text, studentUser.level)
+      const res = await fetch('/api/tutor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: text.trim(),
+          level: studentUser.level,
+          topic: selectedTopic,
+          history: messages.map((m) => ({ role: m.role, content: m.content })),
+        }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok || !data.success) {
+        const errorText =
+          data.error || 'Failed to generate AI response. Please check your network and Gemini API key.'
+        toast({
+          title: 'AI Tutor Notice',
+          description: errorText,
+        })
+        const errorBotMsg: ChatMessage = {
+          id: `bot-err-${Date.now()}`,
+          role: 'assistant',
+          content: `⚠️ ${errorText}`,
+        }
+        setMessages((prev) => [...prev, errorBotMsg])
+        return
+      }
+
       const botMsg: ChatMessage = {
         id: `bot-${Date.now()}`,
         role: 'assistant',
-        content: reply,
+        content: data.reply,
       }
       setMessages((prev) => [...prev, botMsg])
+    } catch {
+      const errMsg = 'Network connection failed while reaching the AI Tutor service.'
+      toast({
+        title: 'Connection Error',
+        description: errMsg,
+      })
+      const errorBotMsg: ChatMessage = {
+        id: `bot-err-${Date.now()}`,
+        role: 'assistant',
+        content: `⚠️ ${errMsg}`,
+      }
+      setMessages((prev) => [...prev, errorBotMsg])
     } finally {
       setIsTyping(false)
     }

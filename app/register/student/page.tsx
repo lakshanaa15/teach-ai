@@ -66,7 +66,7 @@ export default function StudentRegisterPage() {
 
       setSuccessMessage('Student account created successfully! Redirecting to login…')
       setTimeout(() => {
-        router.push('/student/login')
+        router.push('/student-login')
       }, 1500)
     } catch {
       setErrorMessage('Network error during registration. Please try again.')
@@ -229,7 +229,7 @@ export default function StudentRegisterPage() {
               <div className="border-t border-border pt-4 text-center space-y-2 text-xs text-muted-foreground">
                 <p>
                   Already registered?{' '}
-                  <Link href="/student/login" className="font-semibold text-primary hover:underline">
+                  <Link href="/student-login" className="font-semibold text-primary hover:underline">
                     Sign in to Student Portal
                   </Link>
                 </p>

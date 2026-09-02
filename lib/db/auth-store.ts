@@ -157,11 +157,21 @@ class AuthStore {
 
   async findInstitutionByCode(code: string): Promise<InstitutionRecord | null> {
     const cleanCode = code.trim().toUpperCase()
-    const prisma = getPrisma()
-    if (prisma) {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) {
+        throw new Error('Database is configured but Prisma client could not be initialized.')
+      }
       try {
-        let inst = await prisma.institution.findUnique({
-          where: { code: cleanCode },
+        let inst = await prisma.institution.findFirst({
+          where: {
+            OR: [
+              { code: cleanCode },
+              { id: code },
+            ],
+          },
         })
         if (!inst && cleanCode === DEFAULT_INSTITUTION.code.toUpperCase()) {
           inst = await prisma.institution.create({
@@ -171,9 +181,10 @@ class AuthStore {
             },
           })
         }
-        if (inst) return inst
+        return inst || null
       } catch (e) {
-        console.warn('Prisma findInstitutionByCode fallback:', e)
+        console.error('[AUTH-STORE] Prisma findInstitutionByCode error:', e instanceof Error ? e.message : String(e))
+        throw e
       }
     }
     return this.institutions.get(cleanCode) || null
@@ -188,15 +199,21 @@ class AuthStore {
   // User Methods
   async findUserByEmail(email: string): Promise<UserRecord | null> {
     const cleanEmail = email.trim().toLowerCase()
-    const prisma = getPrisma()
-    if (prisma) {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) {
+        throw new Error('Database is configured but Prisma client could not be initialized.')
+      }
       try {
         const user = await prisma.user.findUnique({
           where: { email: cleanEmail },
         })
-        if (user) return user as any
+        return (user as any) || null
       } catch (e) {
-        console.warn('Prisma findUserByEmail fallback:', e)
+        console.error('[AUTH-STORE] Prisma findUserByEmail error:', e instanceof Error ? e.message : String(e))
+        throw e
       }
     }
     return this.users.get(cleanEmail) || null
@@ -212,31 +229,57 @@ class AuthStore {
     className?: string
   }): Promise<{ user: UserRecord; teacher?: TeacherRecord; student?: StudentRecord }> {
     const cleanEmail = params.email.trim().toLowerCase()
-    const prisma = getPrisma()
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
 
-    if (prisma) {
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) {
+        throw new Error('Database is configured but Prisma client could not be initialized.')
+      }
+
       try {
+        // Resolve real database institution record to guarantee foreign-key integrity
+        let inst = await prisma.institution.findFirst({
+          where: {
+            OR: [
+              { id: params.institutionId },
+              { code: 'MKCE2026' },
+            ],
+          },
+        })
+
+        if (!inst) {
+          inst = await prisma.institution.create({
+            data: {
+              name: DEFAULT_INSTITUTION.name,
+              code: DEFAULT_INSTITUTION.code,
+            },
+          })
+        }
+
+        const validInstitutionId = inst.id
+
         const createdUser = await prisma.user.create({
           data: {
-            name: params.name,
+            name: params.name.trim(),
             email: cleanEmail,
             passwordHash: params.passwordHash,
             role: params.role as any,
-            institutionId: params.institutionId,
+            institutionId: validInstitutionId,
             ...(params.role === 'TEACHER'
               ? {
                   teacherProfile: {
                     create: {
-                      institutionId: params.institutionId,
-                      subject: params.subject || 'General Education',
-                      className: params.className || 'Default Class',
+                      institutionId: validInstitutionId,
+                      subject: params.subject?.trim() || 'Database Management Systems',
+                      className: params.className?.trim() || 'DBMS - III CSE A',
                     },
                   },
                 }
               : {
                   studentProfile: {
                     create: {
-                      institutionId: params.institutionId,
+                      institutionId: validInstitutionId,
                       grade: 'Grade 10',
                       level: 'Standard',
                     },
@@ -249,17 +292,20 @@ class AuthStore {
           },
         })
 
+        console.log(`[AUTH-STORE] Created ${createdUser.role} in PostgreSQL: ${createdUser.name} (${createdUser.email}) [ID: ${createdUser.id}]`)
+
         return {
           user: createdUser as any,
           teacher: createdUser.teacherProfile as any,
           student: createdUser.studentProfile as any,
         }
       } catch (e) {
-        console.warn('Prisma createUser fallback:', e)
+        console.error('[AUTH-STORE] Prisma createUser failed in PostgreSQL:', e instanceof Error ? e.message : String(e))
+        throw e
       }
     }
 
-    // In-memory creation
+    // In-memory creation (only when no database configured)
     const user: UserRecord = {
       id: `usr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       name: params.name,
@@ -300,15 +346,20 @@ class AuthStore {
   }
 
   async findTeacherByUserId(userId: string): Promise<TeacherRecord | null> {
-    const prisma = getPrisma()
-    if (prisma) {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) {
+        throw new Error('Database is configured but Prisma client could not be initialized.')
+      }
       try {
         const teacher = await prisma.teacher.findUnique({
           where: { userId },
         })
-        if (teacher) return teacher as any
+        return (teacher as any) || null
       } catch (e) {
-        console.warn('Prisma findTeacherByUserId fallback:', e)
+        console.error('[AUTH-STORE] Prisma findTeacherByUserId error:', e instanceof Error ? e.message : String(e))
+        throw e
       }
     }
     for (const t of this.teachers.values()) {
@@ -318,15 +369,20 @@ class AuthStore {
   }
 
   async findStudentByUserId(userId: string): Promise<StudentRecord | null> {
-    const prisma = getPrisma()
-    if (prisma) {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) {
+        throw new Error('Database is configured but Prisma client could not be initialized.')
+      }
       try {
         const student = await prisma.student.findUnique({
           where: { userId },
         })
-        if (student) return student as any
+        return (student as any) || null
       } catch (e) {
-        console.warn('Prisma findStudentByUserId fallback:', e)
+        console.error('[AUTH-STORE] Prisma findStudentByUserId error:', e instanceof Error ? e.message : String(e))
+        throw e
       }
     }
     for (const s of this.students.values()) {
@@ -351,8 +407,12 @@ class AuthStore {
     const suffix = Math.random().toString(36).substring(2, 6).toUpperCase()
     const classCode = `${prefix}${suffix}`
 
-    const prisma = getPrisma()
-    if (prisma) {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) {
+        throw new Error('Database is configured but Prisma client could not be initialized.')
+      }
       try {
         const created = await prisma.class.create({
           data: {
@@ -366,7 +426,8 @@ class AuthStore {
         })
         return created as any
       } catch (e) {
-        console.warn('Prisma createClass fallback:', e)
+        console.error('[AUTH-STORE] Prisma createClass error:', e instanceof Error ? e.message : String(e))
+        throw e
       }
     }
 
@@ -384,21 +445,51 @@ class AuthStore {
     return cls
   }
 
-  async findClassByCode(classCode: string): Promise<ClassRecord | null> {
+  async findClassByCode(classCode: string): Promise<(ClassRecord & { teacherName?: string }) | null> {
     const cleanCode = classCode.trim().toUpperCase()
-    const prisma = getPrisma()
-    if (prisma) {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) {
+        throw new Error('Database is configured but Prisma client could not be initialized.')
+      }
       try {
         const cls = await prisma.class.findUnique({
           where: { classCode: cleanCode },
+          include: {
+            teacher: {
+              include: { user: true },
+            },
+          },
         })
-        if (cls) return cls as any
+        if (!cls) return null
+        return {
+          id: cls.id,
+          name: cls.name,
+          classCode: cls.classCode,
+          teacherId: cls.teacherId,
+          institutionId: cls.institutionId,
+          subject: cls.subject || undefined,
+          description: cls.description || undefined,
+          createdAt: cls.createdAt,
+          teacherName: cls.teacher?.user?.name || 'Teacher unavailable',
+        }
       } catch (e) {
-        console.warn('Prisma findClassByCode fallback:', e)
+        console.error('[AUTH-STORE] Prisma findClassByCode error:', e instanceof Error ? e.message : String(e))
+        throw e
       }
     }
+
     for (const c of this.classes.values()) {
-      if (c.classCode.toUpperCase() === cleanCode) return c
+      if (c.classCode.toUpperCase() === cleanCode) {
+        const teacher = this.teachers.get(c.teacherId)
+        const user = teacher ? Array.from(this.users.values()).find((u) => u.id === teacher.userId) : null
+        return {
+          ...c,
+          teacherName: user?.name || 'Dr. Priya Menon',
+        }
+      }
     }
     return null
   }
@@ -406,8 +497,12 @@ class AuthStore {
   async listClassesByTeacherId(
     teacherId: string,
   ): Promise<Array<ClassRecord & { studentCount: number }>> {
-    const prisma = getPrisma()
-    if (prisma) {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) {
+        throw new Error('Database is configured but Prisma client could not be initialized.')
+      }
       try {
         const classes = await prisma.class.findMany({
           where: { teacherId },
@@ -418,14 +513,13 @@ class AuthStore {
           },
           orderBy: { createdAt: 'desc' },
         })
-        if (classes) {
-          return classes.map((c: any) => ({
-            ...c,
-            studentCount: c._count?.enrollments ?? 0,
-          }))
-        }
+        return classes.map((c: any) => ({
+          ...c,
+          studentCount: c._count?.enrollments ?? 0,
+        }))
       } catch (e) {
-        console.warn('Prisma listClassesByTeacherId fallback:', e)
+        console.error('[AUTH-STORE] Prisma listClassesByTeacherId error:', e instanceof Error ? e.message : String(e))
+        throw e
       }
     }
 
@@ -445,8 +539,12 @@ class AuthStore {
   async listEnrolledClassesByStudentId(
     studentId: string,
   ): Promise<Array<ClassRecord & { joinedAt: Date; teacherName: string }>> {
-    const prisma = getPrisma()
-    if (prisma) {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) {
+        throw new Error('Database is configured but Prisma client could not be initialized.')
+      }
       try {
         const enrollments = await prisma.enrollment.findMany({
           where: { studentId },
@@ -459,16 +557,23 @@ class AuthStore {
               },
             },
           },
+          orderBy: { joinedAt: 'desc' },
         })
-        if (enrollments && enrollments.length > 0) {
-          return enrollments.map((enr: any) => ({
-            ...enr.class,
-            joinedAt: enr.joinedAt,
-            teacherName: enr.class.teacher?.user?.name || 'Dr. Priya Menon',
-          }))
-        }
+        return enrollments.map((enr: any) => ({
+          id: enr.class.id,
+          name: enr.class.name,
+          classCode: enr.class.classCode,
+          teacherId: enr.class.teacherId,
+          institutionId: enr.class.institutionId,
+          subject: enr.class.subject || undefined,
+          description: enr.class.description || undefined,
+          createdAt: enr.class.createdAt,
+          joinedAt: enr.joinedAt,
+          teacherName: enr.class.teacher?.user?.name || 'Teacher unavailable',
+        }))
       } catch (e) {
-        console.warn('Prisma listEnrolledClassesByStudentId fallback:', e)
+        console.error('[AUTH-STORE] Prisma listEnrolledClassesByStudentId error:', e instanceof Error ? e.message : String(e))
+        throw e
       }
     }
 
@@ -489,8 +594,12 @@ class AuthStore {
   }
 
   async isStudentEnrolled(studentId: string, classId: string): Promise<boolean> {
-    const prisma = getPrisma()
-    if (prisma) {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) {
+        throw new Error('Database is configured but Prisma client could not be initialized.')
+      }
       try {
         const enr = await prisma.enrollment.findUnique({
           where: {
@@ -502,7 +611,8 @@ class AuthStore {
         })
         return Boolean(enr)
       } catch (e) {
-        console.warn('Prisma isStudentEnrolled fallback:', e)
+        console.error('[AUTH-STORE] Prisma isStudentEnrolled error:', e instanceof Error ? e.message : String(e))
+        throw e
       }
     }
     return this.enrollments.has(`${studentId}_${classId}`)
@@ -512,8 +622,12 @@ class AuthStore {
     studentId: string,
     classId: string,
   ): Promise<EnrollmentRecord> {
-    const prisma = getPrisma()
-    if (prisma) {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) {
+        throw new Error('Database is configured but Prisma client could not be initialized.')
+      }
       try {
         const enr = await prisma.enrollment.create({
           data: {
@@ -523,7 +637,8 @@ class AuthStore {
         })
         return enr as any
       } catch (e) {
-        console.warn('Prisma enrollStudent fallback:', e)
+        console.error('[AUTH-STORE] Prisma enrollStudent error:', e instanceof Error ? e.message : String(e))
+        throw e
       }
     }
 

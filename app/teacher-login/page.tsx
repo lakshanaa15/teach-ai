@@ -161,7 +161,7 @@ function TeacherLoginForm() {
           </p>
           <p>
             Are you a student?{' '}
-            <Link href="/student/login" className="font-semibold text-foreground hover:underline">
+            <Link href="/student-login" className="font-semibold text-foreground hover:underline">
               Student Login
             </Link>
           </p>

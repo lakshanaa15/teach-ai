@@ -82,6 +82,8 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    console.log(`[AUTH-REGISTER] Registering ${role}: ${name} (${email}) for Institution Code: ${institutionCode}`)
+
     // 5. Hash password and create user
     const passwordHash = await hashPassword(password)
     const { user } = await authStore.createUser({
@@ -93,6 +95,8 @@ export async function POST(req: NextRequest) {
       subject,
       className,
     })
+
+    console.log(`[AUTH-REGISTER] Successfully completed registration for user: ${user.name} (${user.id})`)
 
     return NextResponse.json({
       success: true,
@@ -106,9 +110,12 @@ export async function POST(req: NextRequest) {
       },
     })
   } catch (error) {
-    console.error('Registration error:', error)
+    console.error('[AUTH-REGISTER] Registration exception:', error instanceof Error ? error.stack || error.message : String(error))
     return NextResponse.json(
-      { success: false, error: 'Registration failed. Please try again.' },
+      {
+        success: false,
+        error: error instanceof Error ? error.message : 'Registration failed. Please try again.',
+      },
       { status: 500 },
     )
   }

@@ -63,7 +63,7 @@ export default function LoginPage() {
               </div>
 
               <div className="mt-6 space-y-2">
-                <Link href="/student/login">
+                <Link href="/student-login">
                   <Button className="w-full gap-2 shadow-sm">
                     Continue as Student
                     <ArrowRight className="size-4" />
@@ -97,7 +97,7 @@ export default function LoginPage() {
               </div>
 
               <div className="mt-6 space-y-2">
-                <Link href="/teacher/login">
+                <Link href="/teacher-login">
                   <Button className="w-full gap-2 shadow-sm">
                     Continue as Teacher
                     <ArrowRight className="size-4" />

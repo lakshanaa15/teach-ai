@@ -69,7 +69,7 @@ export default function TeacherRegisterPage() {
 
       setSuccessMessage('Teacher account created successfully! Redirecting to login…')
       setTimeout(() => {
-        router.push('/teacher/login')
+        router.push('/teacher-login')
       }, 1500)
     } catch {
       setErrorMessage('Network error during registration. Please try again.')
@@ -259,7 +259,7 @@ export default function TeacherRegisterPage() {
               <div className="border-t border-border pt-4 text-center space-y-2 text-xs text-muted-foreground">
                 <p>
                   Already registered?{' '}
-                  <Link href="/teacher/login" className="font-semibold text-primary hover:underline">
+                  <Link href="/teacher-login" className="font-semibold text-primary hover:underline">
                     Sign in to Teacher Portal
                   </Link>
                 </p>

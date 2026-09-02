@@ -22,6 +22,7 @@ import {
   Send,
   Sparkles,
   Trash2,
+  XCircle,
   Zap,
 } from 'lucide-react'
 import { PageHeader } from '@/components/shared/page-header'
@@ -30,262 +31,647 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { LevelBadge } from '@/components/shared/badges'
 import { AILoading } from '@/components/shared/states'
-import { useAppSession } from '@/lib/session-context'
-import type { LearningLevel, QuizQuestion } from '@/lib/types'
 import { useToast } from '@/components/shared/toast'
+import { exportQuizPDF } from '@/lib/export-pdf'
+
+interface SavedQuestion {
+  id: string
+  type: 'MCQ' | 'True/False' | 'Short Answer'
+  question: string
+  options: string[]
+  answer: string
+  explanation: string
+  concept?: string | null
+  difficulty?: string | null
+  marks?: number | null
+}
+
+interface SavedQuiz {
+  id: string
+  title: string
+  subject?: string | null
+  grade?: string | null
+  topic: string
+  learningObjective?: string | null
+  duration?: string | null
+  curriculum?: string | null
+  source?: string | null
+  difficulty: string
+  status: 'Draft' | 'Approved' | 'Pending_Review'
+  questions: SavedQuestion[]
+  createdAt: string
+  class?: { id: string; name: string; classCode: string } | null
+}
+
+interface TeacherClass {
+  id: string
+  name: string
+  classCode: string
+}
 
 export default function QuizzesPage() {
   const { toast } = useToast()
-  const { selectedTopic, setSelectedTopic, getQuizForTopic } = useAppSession()
 
-  // Form State
-  const [topic, setTopic] = React.useState(selectedTopic)
-  const [difficulty, setDifficulty] = React.useState<LearningLevel>('Standard')
-  const [questionCount, setQuestionCount] = React.useState(4)
-  const [questionType, setQuestionType] = React.useState<QuizQuestion['type']>('MCQ')
+  // 8 Required Teacher Inputs
+  const [subject, setSubject] = React.useState('Database Management Systems')
+  const [grade, setGrade] = React.useState('Grade 10')
+  const [topic, setTopic] = React.useState('ER Model — Entity, Attribute, Cardinality')
+  const [learningObjective, setLearningObjective] = React.useState(
+    'Assess understanding of 1:1, 1:N, and M:N relationship cardinalities and junction table conversion.',
+  )
+  const [duration, setDuration] = React.useState('15 mins')
+  const [noOfQuestions, setNoOfQuestions] = React.useState(4)
+  const [curriculum, setCurriculum] = React.useState('CBSE / Computer Science')
+  const [optionalSource, setOptionalSource] = React.useState('')
+  const [selectedClassId, setSelectedClassId] = React.useState('')
 
+  // State
+  const [classes, setClasses] = React.useState<TeacherClass[]>([])
   const [isLoading, setIsLoading] = React.useState(false)
-  const [questions, setQuestions] = React.useState<QuizQuestion[]>([])
+  const [isSaving, setIsSaving] = React.useState(false)
+  const [activeQuiz, setActiveQuiz] = React.useState<SavedQuiz | null>(null)
+  const [savedQuizzesList, setSavedQuizzesList] = React.useState<SavedQuiz[]>([])
+
+  // Inline Question Editing
   const [editingQuestionId, setEditingQuestionId] = React.useState<string | null>(null)
-  const [editFormData, setEditFormData] = React.useState<QuizQuestion | null>(null)
+  const [editFormData, setEditFormData] = React.useState<SavedQuestion | null>(null)
+  const [quizTitle, setQuizTitle] = React.useState('')
 
-  // Sync topic with session
+  // Load teacher classes and existing quizzes
   React.useEffect(() => {
-    setTopic(selectedTopic)
-    handleGenerate(selectedTopic)
-  }, [selectedTopic])
+    fetchTeacherClasses()
+    fetchSavedQuizzes()
+  }, [])
 
-  const handleGenerate = async (topicToGenerate = topic) => {
+  const fetchTeacherClasses = async () => {
+    try {
+      const res = await fetch('/api/classes')
+      const data = await res.json()
+      if (res.ok && data.classes) {
+        setClasses(data.classes)
+        if (data.classes.length > 0) {
+          setSelectedClassId(data.classes[0].id)
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const fetchSavedQuizzes = async () => {
+    try {
+      const res = await fetch('/api/quizzes')
+      const data = await res.json()
+      if (res.ok && data.quizzes && data.quizzes.length > 0) {
+        setSavedQuizzesList(data.quizzes)
+        if (!activeQuiz) {
+          setActiveQuiz(data.quizzes[0])
+          setQuizTitle(data.quizzes[0].title)
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const handleGenerate = async () => {
+    const countNum = Number(noOfQuestions)
+    if (!countNum || countNum < 1) {
+      toast({ title: 'Validation Error', description: 'No. of Questions must be a positive integer.' })
+      return
+    }
+
+    if (!subject.trim() || !grade.trim() || !topic.trim() || !learningObjective.trim() || !duration.trim() || !curriculum.trim()) {
+      toast({
+        title: 'Missing Required Fields',
+        description: 'Please complete all required fields (Subject, Grade, Topic, Objective, Duration, Board).',
+      })
+      return
+    }
+
     setIsLoading(true)
     try {
-      const generated = await getQuizForTopic(topicToGenerate, questionCount)
-      setQuestions(generated)
+      const res = await fetch('/api/quizzes/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: subject.trim(),
+          grade: grade.trim(),
+          topic: topic.trim(),
+          learningObjective: learningObjective.trim(),
+          duration: duration.trim(),
+          curriculum: curriculum.trim(),
+          count: countNum,
+          optionalSource: optionalSource.trim() || undefined,
+          classId: selectedClassId || undefined,
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        toast({
+          title: 'Quiz Generation Failed',
+          description: data.error || 'Gemini API failed to generate quiz.',
+        })
+        return
+      }
+
+      const quiz: SavedQuiz = data.quiz
+      setActiveQuiz(quiz)
+      setQuizTitle(quiz.title)
+      setEditingQuestionId(null)
+      setSavedQuizzesList((prev) => [quiz, ...prev.filter((q) => q.id !== quiz.id)])
+
+      toast({
+        title: `Generated ${quiz.questions.length} Questions with Gemini AI! 🎉`,
+        description: `Quiz "${quiz.title}" saved as DRAFT in PostgreSQL.`,
+      })
+    } catch {
+      toast({ title: 'Connection Error', description: 'Could not reach quiz generation service.' })
     } finally {
       setIsLoading(false)
     }
   }
 
-  const handleStartEdit = (q: QuizQuestion) => {
+  const handleStartEditQuestion = (q: SavedQuestion) => {
     setEditingQuestionId(q.id)
     setEditFormData({ ...q })
   }
 
-  const handleSaveQuestionEdit = () => {
-    if (!editFormData) return
-    setQuestions((prev) =>
-      prev.map((q) => (q.id === editFormData.id ? editFormData : q)),
-    )
+  const handleSaveInlineQuestionEdit = () => {
+    if (!editFormData || !activeQuiz) return
+    setActiveQuiz((prev) => {
+      if (!prev) return null
+      return {
+        ...prev,
+        questions: prev.questions.map((q) => (q.id === editFormData.id ? editFormData : q)),
+      }
+    })
     setEditingQuestionId(null)
     setEditFormData(null)
-    toast({ title: 'Question updated' })
+    toast({ title: 'Question updated in memory' })
   }
 
   const handleDeleteQuestion = (id: string) => {
-    setQuestions((prev) => prev.filter((q) => q.id !== id))
+    if (!activeQuiz) return
+    setActiveQuiz((prev) => {
+      if (!prev) return null
+      return {
+        ...prev,
+        questions: prev.questions.filter((q) => q.id !== id),
+      }
+    })
     toast({ title: 'Question removed' })
   }
 
-  const handleRegenerateSingle = async (index: number) => {
-    const single = await getQuizForTopic(topic, 1)
-    setQuestions((prev) => {
-      const next = [...prev]
-      next[index] = { ...single[0], id: `regen-${Date.now()}` }
-      return next
-    })
-    toast({ title: 'Question regenerated' })
-  }
-
   const handleAddQuestion = () => {
-    const newQ: QuizQuestion = {
-      id: `custom-${Date.now()}`,
-      type: questionType,
+    if (!activeQuiz) return
+    const newQ: SavedQuestion = {
+      id: `q-custom-${Date.now()}`,
+      type: 'MCQ',
       question: 'New custom concept question…',
-      options:
-        questionType === 'MCQ'
-          ? ['Option A', 'Option B', 'Option C', 'Option D']
-          : questionType === 'True/False'
-            ? ['True', 'False']
-            : undefined,
-      answer: questionType === 'True/False' ? 'True' : 'Correct Answer',
-      explanation: 'Explanation of why this answer is correct.',
-      concept: 'Custom Concept',
+      options: ['Option A', 'Option B', 'Option C', 'Option D'],
+      answer: 'Option A',
+      explanation: 'Detailed pedagogical reason for this answer.',
+      concept: activeQuiz.topic,
+      difficulty: 'Standard',
+      marks: 1,
     }
-    setQuestions((prev) => [...prev, newQ])
-    handleStartEdit(newQ)
+    setActiveQuiz((prev) => {
+      if (!prev) return null
+      return {
+        ...prev,
+        questions: [...prev.questions, newQ],
+      }
+    })
+    handleStartEditQuestion(newQ)
   }
 
-  const handleExport = (format: string) => {
-    toast({
-      title: `Quiz exported as ${format}`,
-      description: `${questions.length} questions prepared for distribution.`,
-    })
+  const handleSaveChanges = async () => {
+    if (!activeQuiz) return
+    setIsSaving(true)
+
+    try {
+      const res = await fetch(`/api/quizzes/${activeQuiz.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: quizTitle.trim() || activeQuiz.title,
+          questions: activeQuiz.questions,
+          classId: selectedClassId || activeQuiz.class?.id || undefined,
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        toast({ title: 'Save Failed', description: data.error })
+        return
+      }
+
+      setActiveQuiz(data.quiz)
+      setSavedQuizzesList((prev) =>
+        prev.map((q) => (q.id === data.quiz.id ? data.quiz : q)),
+      )
+
+      toast({
+        title: 'Quiz Saved Successfully',
+        description: 'All questions and edits persisted in PostgreSQL (Status: DRAFT).',
+      })
+    } catch {
+      toast({ title: 'Error', description: 'Failed to save quiz changes.' })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handlePublish = async () => {
+    if (!activeQuiz) return
+    setIsSaving(true)
+
+    try {
+      // First save latest questions and title
+      await fetch(`/api/quizzes/${activeQuiz.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: quizTitle.trim() || activeQuiz.title,
+          questions: activeQuiz.questions,
+          classId: selectedClassId || activeQuiz.class?.id || undefined,
+        }),
+      })
+
+      // Publish / Approve
+      const res = await fetch(`/api/quizzes/${activeQuiz.id}/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          classId: selectedClassId || activeQuiz.class?.id || undefined,
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        toast({ title: 'Publish Failed', description: data.error })
+        return
+      }
+
+      setActiveQuiz(data.quiz)
+      setSavedQuizzesList((prev) =>
+        prev.map((q) => (q.id === data.quiz.id ? data.quiz : q)),
+      )
+
+      toast({
+        title: 'Quiz Approved & Published! 🚀',
+        description: `Quiz is now LIVE and visible to enrolled students.`,
+      })
+    } catch {
+      toast({ title: 'Error', description: 'Failed to publish quiz.' })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleDeleteQuiz = async (id: string) => {
+    try {
+      const res = await fetch(`/api/quizzes/${id}`, { method: 'DELETE' })
+      if (res.ok) {
+        setSavedQuizzesList((prev) => prev.filter((q) => q.id !== id))
+        if (activeQuiz?.id === id) {
+          const remaining = savedQuizzesList.filter((q) => q.id !== id)
+          setActiveQuiz(remaining[0] || null)
+          setQuizTitle(remaining[0]?.title || '')
+        }
+        toast({ title: 'Quiz deleted' })
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to delete quiz.' })
+    }
+  }
+
+  const handleExportStudentPDF = () => {
+    if (!activeQuiz) return
+    exportQuizPDF(activeQuiz, 'student')
+    toast({ title: 'Exporting Student Quiz PDF…', description: 'Printing student paper (answers hidden).' })
+  }
+
+  const handleExportAnswerKeyPDF = () => {
+    if (!activeQuiz) return
+    exportQuizPDF(activeQuiz, 'answer_key')
+    toast({ title: 'Exporting Answer Key PDF…', description: 'Printing master copy with answers & explanations.' })
   }
 
   return (
     <div className="space-y-8">
       {/* Header */}
       <PageHeader
-        title="Formative Quiz Generator & Rubrics"
-        description="Generate concept-mapped formative quizzes. Tailor difficulty, question formats, and learning tracks with editable pedagogical rubrics."
+        title="Formative Quiz Generator & Assessment Rubrics"
+        description="Generate curriculum-aligned formative quizzes with Google Gemini AI. Review, customize distractors, save drafts in PostgreSQL, export PDF exam papers, and publish directly to enrolled classes."
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleExport('PDF')}
-              className="gap-1.5 text-xs"
-            >
-              <FileDown className="size-4" />
-              Export PDF
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleExport('LMS JSON')}
-              className="gap-1.5 text-xs"
-            >
-              <Download className="size-4" />
-              Export JSON
-            </Button>
-            <Button
-              size="sm"
-              onClick={() =>
-                toast({
-                  title: 'Quiz saved & published',
-                  description: `Published "${topic} Check" to Grade 10 students.`,
-                })
-              }
-              className="gap-1.5 shadow-sm"
-            >
-              <Save className="size-4" />
-              Save & Assign
-            </Button>
+            {activeQuiz && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportStudentPDF}
+                  className="gap-1.5 text-xs shadow-sm"
+                >
+                  <FileDown className="size-4" />
+                  Export Quiz PDF
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportAnswerKeyPDF}
+                  className="gap-1.5 text-xs shadow-sm"
+                >
+                  <FileCheck2 className="size-4 text-primary" />
+                  Export Answer Key PDF
+                </Button>
+                {activeQuiz.status !== 'Approved' ? (
+                  <Button
+                    size="sm"
+                    onClick={handlePublish}
+                    disabled={isSaving || isLoading}
+                    className="gap-1.5 shadow-sm bg-success hover:bg-success/90"
+                  >
+                    <Send className="size-4" />
+                    Approve & Publish
+                  </Button>
+                ) : (
+                  <Badge variant="success" className="px-3 py-1 text-xs gap-1">
+                    <Check className="size-3.5" /> Published
+                  </Badge>
+                )}
+              </>
+            )}
           </div>
         }
       />
 
-      {/* Generator Settings Form */}
-      <Card className="border-border/80 bg-card/60 p-5">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          {/* Topic */}
-          <div className="space-y-1">
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Topic
-            </label>
-            <select
-              value={topic}
-              onChange={(e) => {
-                setTopic(e.target.value)
-                setSelectedTopic(e.target.value)
-              }}
-              className="h-9 w-full rounded-lg border border-input bg-card px-3 text-sm font-semibold outline-none focus-visible:border-ring focus-visible:ring-2"
-            >
-              <option value="ER Model">ER Model — Entity, Attribute, Cardinality</option>
-              <option value="Trigonometric Identities">Trigonometric Identities</option>
-              <option value="Intro to Calculus">Intro to Calculus</option>
-              <option value="Quadratic Functions">Quadratic Functions</option>
-            </select>
+      {/* Teacher Input Form Card (8 Inputs) */}
+      <Card className="border-primary/30 bg-card shadow-sm">
+        <CardHeader className="border-b border-border pb-3 bg-muted/20">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="size-4 text-primary" />
+              <CardTitle className="text-sm font-bold">Assessment Generation Parameters</CardTitle>
+            </div>
+            <span className="text-xs text-muted-foreground">Powered by Google Gemini</span>
+          </div>
+        </CardHeader>
+
+        <CardContent className="p-5 space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {/* 1. Subject */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                Subject <span className="text-destructive">*</span>
+              </label>
+              <input
+                type="text"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="e.g. Database Management Systems"
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
+              />
+            </div>
+
+            {/* 2. Grade */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                Grade / Class <span className="text-destructive">*</span>
+              </label>
+              <input
+                type="text"
+                value={grade}
+                onChange={(e) => setGrade(e.target.value)}
+                placeholder="e.g. Grade 10, Grade 12"
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
+              />
+            </div>
+
+            {/* 3. Duration */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                Duration <span className="text-destructive">*</span>
+              </label>
+              <input
+                type="text"
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+                placeholder="e.g. 15 mins, 30 mins"
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
+              />
+            </div>
+
+            {/* 4. Curriculum/Board */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                Curriculum / Board <span className="text-destructive">*</span>
+              </label>
+              <input
+                type="text"
+                value={curriculum}
+                onChange={(e) => setCurriculum(e.target.value)}
+                placeholder="e.g. CBSE, ICSE, Cambridge, ABET"
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
+              />
+            </div>
           </div>
 
-          {/* Difficulty Level */}
-          <div className="space-y-1">
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Difficulty Tier
-            </label>
-            <select
-              value={difficulty}
-              onChange={(e) => setDifficulty(e.target.value as LearningLevel)}
-              className="h-9 w-full rounded-lg border border-input bg-card px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2"
-            >
-              <option value="Remedial">Remedial (Scaffolded)</option>
-              <option value="Standard">Standard (Grade Level)</option>
-              <option value="Advanced">Advanced (Challenge)</option>
-            </select>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {/* 5. Topic */}
+            <div className="space-y-1.5 lg:col-span-2">
+              <label className="text-xs font-semibold text-foreground">
+                Topic <span className="text-destructive">*</span>
+              </label>
+              <input
+                type="text"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                placeholder="e.g. ER Model — Entity, Attribute, Cardinality"
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
+              />
+            </div>
+
+            {/* 6. No. of Questions (REQUIRED POSITIVE INTEGER) */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                No. of Questions <span className="text-destructive">*</span>
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={noOfQuestions}
+                onChange={(e) => setNoOfQuestions(Math.max(1, Number(e.target.value)))}
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
+              />
+            </div>
           </div>
 
-          {/* Question Type */}
-          <div className="space-y-1">
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Question Type
+          {/* 7. Learning Objective */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground">
+              Learning Objective <span className="text-destructive">*</span>
             </label>
-            <select
-              value={questionType}
-              onChange={(e) => setQuestionType(e.target.value as QuizQuestion['type'])}
-              className="h-9 w-full rounded-lg border border-input bg-card px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2"
-            >
-              <option value="MCQ">Multiple Choice (MCQ)</option>
-              <option value="True/False">True / False</option>
-              <option value="Short Answer">Short Answer</option>
-            </select>
+            <textarea
+              rows={2}
+              value={learningObjective}
+              onChange={(e) => setLearningObjective(e.target.value)}
+              placeholder="e.g. Test understanding of 1:1, 1:N, M:N relationship cardinalities and weak entities..."
+              className="w-full resize-none rounded-lg border border-input bg-background p-2.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-2"
+            />
           </div>
 
-          {/* Count */}
-          <div className="space-y-1">
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Questions
-            </label>
-            <select
-              value={questionCount}
-              onChange={(e) => setQuestionCount(Number(e.target.value))}
-              className="h-9 w-full rounded-lg border border-input bg-card px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2"
-            >
-              <option value={3}>3 Questions</option>
-              <option value={4}>4 Questions</option>
-              <option value={5}>5 Questions</option>
-            </select>
+          {/* 8. Optional Source & Class Assignment */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground">
+                Optional Source / Context Notes
+              </label>
+              <input
+                type="text"
+                value={optionalSource}
+                onChange={(e) => setOptionalSource(e.target.value)}
+                placeholder="e.g. Lecture Notes Chapter 3, textbook excerpts..."
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2"
+              />
+            </div>
+
+            {classes.length > 0 && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground">
+                  Publish Target Class <span className="text-primary">*</span>
+                </label>
+                <select
+                  value={selectedClassId}
+                  onChange={(e) => setSelectedClassId(e.target.value)}
+                  className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
+                >
+                  <option value="">-- All Enrolled Students (General) --</option>
+                  {classes.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.classCode})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Trigger Button */}
-          <div className="space-y-1 flex flex-col justify-end">
+          <div className="flex justify-end pt-2 border-t border-border">
             <Button
-              onClick={() => handleGenerate(topic)}
-              disabled={isLoading}
-              className="h-9 gap-1.5 shadow-sm"
+              onClick={handleGenerate}
+              disabled={isLoading || !subject.trim() || !topic.trim()}
+              className="gap-2 shadow-sm"
             >
-              <Sparkles className={`size-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-              Generate Quiz
+              <Sparkles className={`size-4 ${isLoading ? 'animate-spin' : ''}`} />
+              {isLoading ? `Generating ${noOfQuestions} Questions with Gemini…` : 'Generate Quiz'}
             </Button>
           </div>
-        </div>
+        </CardContent>
       </Card>
 
-      {/* Generated Questions Area */}
-      {isLoading ? (
+      {/* Loading State */}
+      {isLoading && (
         <AILoading
-          label={`Generating ${questionCount} ${difficulty} questions for ${topic}…`}
+          label={`Generating ${noOfQuestions} concept-mapped questions for ${topic} with Gemini AI…`}
           steps={[
             'Extracting core conceptual learning objectives…',
             'Constructing plausible distractor options mapped to common misconceptions…',
             'Drafting step-by-step explanatory feedback for student review…',
+            'Saving draft assessment into PostgreSQL…',
           ]}
         />
-      ) : (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <h2 className="font-display text-lg font-bold">
-                Generated Assessment ({questions.length} questions)
-              </h2>
-              <LevelBadge level={difficulty} />
-              <Badge variant="outline" className="text-xs font-mono">
-                {topic}
-              </Badge>
-            </div>
+      )}
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleAddQuestion}
-              className="gap-1.5 text-xs"
-            >
-              <Plus className="size-3.5" />
-              Add Question
-            </Button>
-          </div>
+      {/* Generated Quiz Result Display (SAME PAGE) */}
+      {!isLoading && activeQuiz && (
+        <div className="space-y-6 animate-in fade-in-50">
+          {/* Action Bar */}
+          <Card className="border-border bg-muted/20 p-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <Badge
+                  variant={activeQuiz.status === 'Approved' ? 'success' : 'warning'}
+                  className="px-2.5 py-0.5 font-bold uppercase text-[11px]"
+                >
+                  {activeQuiz.status === 'Approved' ? '✓ PUBLISHED' : '⚡ DRAFT'}
+                </Badge>
+                <div>
+                  <h2 className="text-base font-bold text-foreground">
+                    <input
+                      type="text"
+                      value={quizTitle}
+                      onChange={(e) => setQuizTitle(e.target.value)}
+                      className="h-8 rounded border border-input bg-card px-2 font-bold text-sm"
+                    />
+                  </h2>
+                  <p className="text-xs text-muted-foreground">
+                    {activeQuiz.subject} · {activeQuiz.grade} · {activeQuiz.questions.length} Questions · {activeQuiz.duration}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAddQuestion}
+                  className="gap-1.5 text-xs"
+                >
+                  <Plus className="size-3.5" />
+                  Add Question
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSaveChanges}
+                  disabled={isSaving}
+                  className="gap-1.5 text-xs"
+                >
+                  <Save className="size-3.5" />
+                  Save Draft
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportStudentPDF}
+                  className="gap-1.5 text-xs"
+                >
+                  <FileDown className="size-3.5" />
+                  Student PDF
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportAnswerKeyPDF}
+                  className="gap-1.5 text-xs"
+                >
+                  <FileCheck2 className="size-3.5 text-primary" />
+                  Answer Key PDF
+                </Button>
+                {activeQuiz.status !== 'Approved' && (
+                  <Button
+                    size="sm"
+                    onClick={handlePublish}
+                    disabled={isSaving}
+                    className="gap-1.5 text-xs shadow-sm bg-success hover:bg-success/90"
+                  >
+                    <Send className="size-3.5" />
+                    Approve & Publish
+                  </Button>
+                )}
+              </div>
+            </div>
+          </Card>
 
           {/* Questions List */}
           <div className="space-y-4">
-            {questions.map((q, index) => {
+            {activeQuiz.questions.map((q, index) => {
               const isEditing = editingQuestionId === q.id
 
               return (
@@ -303,27 +689,22 @@ export default function QuizzesPage() {
                           {q.concept}
                         </Badge>
                       )}
+                      <Badge variant="outline" className="text-[10px]">
+                        {q.marks || 1} mark{(q.marks || 1) > 1 ? 's' : ''}
+                      </Badge>
                     </div>
 
                     <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
                         size="xs"
-                        onClick={() => handleRegenerateSingle(index)}
-                        title="Regenerate this question"
-                        className="gap-1 text-xs text-muted-foreground hover:text-foreground"
-                      >
-                        <RefreshCw className="size-3" />
-                        Regen
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => (isEditing ? handleSaveQuestionEdit() : handleStartEdit(q))}
+                        onClick={() =>
+                          isEditing ? handleSaveInlineQuestionEdit() : handleStartEditQuestion(q)
+                        }
                         className="gap-1 text-xs text-muted-foreground hover:text-foreground"
                       >
                         <Edit3 className="size-3" />
-                        {isEditing ? 'Save' : 'Edit'}
+                        {isEditing ? 'Done' : 'Edit'}
                       </Button>
                       <Button
                         variant="ghost"
@@ -354,7 +735,7 @@ export default function QuizzesPage() {
                           />
                         </div>
 
-                        {editFormData.options && (
+                        {editFormData.options && editFormData.options.length > 0 && (
                           <div className="space-y-1.5">
                             <label className="text-xs font-semibold uppercase text-muted-foreground">
                               Options
@@ -415,7 +796,7 @@ export default function QuizzesPage() {
                           >
                             Cancel
                           </Button>
-                          <Button size="xs" onClick={handleSaveQuestionEdit}>
+                          <Button size="xs" onClick={handleSaveInlineQuestionEdit}>
                             Save Question
                           </Button>
                         </div>
@@ -450,7 +831,7 @@ export default function QuizzesPage() {
                           </div>
                         )}
 
-                        {/* Short Answer / Answer display */}
+                        {/* Short Answer */}
                         {(!q.options || q.options.length === 0) && (
                           <div className="rounded-lg bg-muted/40 p-2.5 text-xs text-foreground">
                             <span className="font-semibold text-muted-foreground">Answer: </span>
@@ -458,7 +839,7 @@ export default function QuizzesPage() {
                           </div>
                         )}
 
-                        {/* Explanation */}
+                        {/* Pedagogical Explanation */}
                         <div className="rounded-lg bg-primary/5 p-3 border border-primary/15 text-xs">
                           <span className="font-semibold text-primary">Pedagogical Explanation: </span>
                           <span className="text-muted-foreground">{q.explanation}</span>
@@ -471,13 +852,38 @@ export default function QuizzesPage() {
             })}
           </div>
 
-          <div className="flex justify-end gap-2 border-t border-border pt-4">
-            <Link href={`/student/quizzes?topic=${encodeURIComponent(topic)}`}>
-              <Button size="sm" className="gap-2 shadow-sm">
-                Preview Student Quiz Experience
+          {/* Bottom Actions */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+            <Link href={`/student/quizzes`}>
+              <Button variant="outline" size="sm" className="gap-2 text-xs">
+                View Student Assessment Portal
                 <ArrowRight className="size-4" />
               </Button>
             </Link>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSaveChanges}
+                disabled={isSaving}
+                className="gap-1.5 text-xs"
+              >
+                <Save className="size-3.5" />
+                Save Changes (Draft)
+              </Button>
+              {activeQuiz.status !== 'Approved' && (
+                <Button
+                  size="sm"
+                  onClick={handlePublish}
+                  disabled={isSaving}
+                  className="gap-1.5 text-xs shadow-sm bg-success hover:bg-success/90"
+                >
+                  <Send className="size-3.5" />
+                  Publish To Students
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       )}

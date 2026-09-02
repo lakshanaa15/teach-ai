@@ -96,20 +96,63 @@ interface SessionContextValue extends SessionState {
   }) => void
 }
 
+export interface InitialSessionUser {
+  id?: string
+  name?: string
+  email?: string
+  role?: string
+  institutionName?: string
+  className?: string
+  subject?: string
+  teacherId?: string
+  studentId?: string
+}
+
 const STORAGE_KEY = 'teachai_session_data_v2'
 
 const SessionContext = React.createContext<SessionContextValue | null>(null)
 
-export function SessionProvider({ children }: { children: React.ReactNode }) {
+export function SessionProvider({
+  children,
+  initialUser,
+}: {
+  children: React.ReactNode
+  initialUser?: InitialSessionUser | null
+}) {
   const [state, setState] = React.useState<SessionState>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY)
-        if (saved) return JSON.parse(saved)
-      } catch (e) {
-        console.warn('Could not load session from localStorage', e)
-      }
-    }
+    // If an authoritative session user exists from server cookies, use that user
+    const baseStudentUser: StudentUserProfile = initialUser?.name
+      ? {
+          id: initialUser.id,
+          name: initialUser.name,
+          email: initialUser.email || initialStudentUser.email,
+          role: initialUser.role || 'STUDENT',
+          institutionName: initialUser.institutionName || 'M. Kumarasamy College of Engineering',
+          level: 'Standard',
+          currentSubject: 'Database Management Systems',
+          currentTopic: 'ER Model',
+          streak: 4,
+        }
+      : initialStudentUser
+
+    const baseTeacherUser: TeacherUserProfile = initialUser?.name
+      ? {
+          id: initialUser.id,
+          name: initialUser.name,
+          email: initialUser.email || 'priya.menon@school.edu',
+          role: initialUser.role || 'TEACHER',
+          institutionName: initialUser.institutionName || 'M. Kumarasamy College of Engineering',
+          className: initialUser.className || 'DBMS - III CSE A',
+          subject: initialUser.subject || 'Database Management Systems',
+        }
+      : {
+          name: 'Dr. Priya Menon',
+          email: 'priya.menon@school.edu',
+          subject: 'Database Management Systems',
+          className: 'DBMS - III CSE A',
+          institutionName: 'M. Kumarasamy College of Engineering',
+        }
+
     return {
       materials: initialMaterials,
       selectedTopic: 'ER Model',
@@ -121,14 +164,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         'Trigonometric Identities': 'Approved',
       },
       students: initialStudents,
-      studentUser: initialStudentUser,
-      teacherUser: {
-        name: 'Dr. Priya Menon',
-        email: 'priya.menon@school.edu',
-        subject: 'Database Management Systems',
-        className: 'DBMS - III CSE A',
-        institutionName: 'M. Kumarasamy College of Engineering',
-      },
+      studentUser: baseStudentUser,
+      teacherUser: baseTeacherUser,
       studentQuizResults: initialStudents[0].quizHistory,
       latestQuizSubmission: null,
       teacherRecommendations: initialRecommendations,

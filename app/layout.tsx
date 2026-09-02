@@ -2,6 +2,7 @@ import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import { Inter, Sora } from 'next/font/google'
 import { SessionProvider } from '@/lib/session-context'
+import { getServerSession } from '@/lib/auth/session'
 import './globals.css'
 
 const inter = Inter({
@@ -45,15 +46,29 @@ export const viewport: Viewport = {
   themeColor: '#ffffff',
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const session = await getServerSession()
+  const initialUser = session
+    ? {
+        id: session.userId,
+        name: session.name,
+        email: session.email,
+        role: session.role,
+        institutionName: session.institutionName,
+        className: session.className,
+        teacherId: session.teacherId,
+        studentId: session.studentId,
+      }
+    : null
+
   return (
     <html lang="en" className={`${inter.variable} ${sora.variable} bg-background`}>
       <body className="font-sans antialiased">
-        <SessionProvider>{children}</SessionProvider>
+        <SessionProvider initialUser={initialUser}>{children}</SessionProvider>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>

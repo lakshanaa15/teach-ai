@@ -45,11 +45,11 @@ export function getPrisma(): PrismaClient | null {
 
     return client
   } catch (error) {
-    console.warn(
-      'Prisma client could not be initialized (using in-memory/mock fallback):',
+    console.error(
+      '[PRISMA-INIT-ERROR] Failed to initialize Prisma PostgreSQL client:',
       error instanceof Error ? error.message : String(error),
     )
-    return null
+    throw error
   }
 }
 
