@@ -20,7 +20,7 @@ export async function generateQuizService(
         data: {
           title: `${topic} Check Assessment`,
           topic,
-          difficulty: 'Standard',
+          difficulty: 'Standard' as any,
           questions: {
             create: questions.map((q) => ({
               type: q.type as any,
@@ -65,10 +65,12 @@ export async function evaluateQuizSubmissionService(
               create: {
                 title: `${topic} Check Quiz`,
                 topic,
-                difficulty: 'Standard',
+                difficulty: 'Standard' as any,
               },
             },
-            studentId: student.id,
+            student: {
+              connect: { id: student.id },
+            },
             topic,
             score: submission.score,
             total: submission.total,

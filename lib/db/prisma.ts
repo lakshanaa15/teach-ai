@@ -1,40 +1,49 @@
 /**
  * Prisma Database Client for TeachAI (Prisma 7 compatible).
  *
- * Provides a resilient singleton PrismaClient when DATABASE_URL is configured.
- * Safely falls back to null or in-memory service when run in offline/demo mode without database credentials.
+ * Uses the official @prisma/adapter-pg PostgreSQL driver adapter for direct, high-performance
+ * database connectivity with Supabase PostgreSQL.
+ * Safely falls back to null when run in offline/demo mode without database credentials.
  */
 
-// Prisma client singleton with connection resilience
-let prismaInstance: any = null
+import { Pool } from 'pg'
+import { PrismaPg } from '@prisma/adapter-pg'
+import { PrismaClient } from '@prisma/client'
 
-export function getPrisma() {
-  if (prismaInstance) return prismaInstance
+// Global singleton instance for connection pooling across hot reloads in Next.js
+const globalForPrisma = global as unknown as {
+  prisma: PrismaClient | null
+  pool: Pool | null
+}
 
-  const databaseUrl = process.env.DATABASE_URL
+export function getPrisma(): PrismaClient | null {
+  if (globalForPrisma.prisma) {
+    return globalForPrisma.prisma
+  }
+
+  const databaseUrl = process.env.DATABASE_URL || process.env.DIRECT_URL
 
   if (!databaseUrl || databaseUrl.trim() === '') {
     return null
   }
 
   try {
-    // Dynamic import to prevent build-time crashes if @prisma/client is ungenerated in demo environments
-    const { PrismaClient } = require('@prisma/client')
+    const pool = globalForPrisma.pool || new Pool({ connectionString: databaseUrl })
+    if (process.env.NODE_ENV !== 'production') {
+      globalForPrisma.pool = pool
+    }
 
-    const clientOptions: any = {
+    const adapter = new PrismaPg(pool)
+    const client = new PrismaClient({
+      adapter,
       log: process.env.NODE_ENV === 'production' ? ['error'] : ['error', 'warn'],
+    })
+
+    if (process.env.NODE_ENV !== 'production') {
+      globalForPrisma.prisma = client
     }
 
-    if (process.env.NODE_ENV === 'production') {
-      prismaInstance = new PrismaClient(clientOptions)
-    } else {
-      const globalForPrisma = global as unknown as { prisma: any }
-      if (!globalForPrisma.prisma) {
-        globalForPrisma.prisma = new PrismaClient(clientOptions)
-      }
-      prismaInstance = globalForPrisma.prisma
-    }
-    return prismaInstance
+    return client
   } catch (error) {
     console.warn(
       'Prisma client could not be initialized (using in-memory/mock fallback):',

@@ -155,15 +155,22 @@ class AuthStore {
     this.initialized = true
   }
 
-  // Institution Methods
   async findInstitutionByCode(code: string): Promise<InstitutionRecord | null> {
     const cleanCode = code.trim().toUpperCase()
     const prisma = getPrisma()
     if (prisma) {
       try {
-        const inst = await prisma.institution.findUnique({
+        let inst = await prisma.institution.findUnique({
           where: { code: cleanCode },
         })
+        if (!inst && cleanCode === DEFAULT_INSTITUTION.code.toUpperCase()) {
+          inst = await prisma.institution.create({
+            data: {
+              name: DEFAULT_INSTITUTION.name,
+              code: DEFAULT_INSTITUTION.code,
+            },
+          })
+        }
         if (inst) return inst
       } catch (e) {
         console.warn('Prisma findInstitutionByCode fallback:', e)
