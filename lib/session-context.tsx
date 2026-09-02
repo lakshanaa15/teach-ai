@@ -45,6 +45,16 @@ export interface StudentUserProfile {
   streak: number
 }
 
+export interface TeacherUserProfile {
+  id?: string
+  name: string
+  email: string
+  role?: string
+  institutionName?: string
+  subject: string
+  className: string
+}
+
 interface SessionState {
   materials: Material[]
   selectedTopic: string
@@ -54,6 +64,7 @@ interface SessionState {
   approvalStatuses: Record<string, ApprovalStatus>
   students: Student[]
   studentUser: StudentUserProfile
+  teacherUser: TeacherUserProfile
   studentQuizResults: QuizResult[]
   latestQuizSubmission: QuizSubmission | null
   teacherRecommendations: Recommendation[]
@@ -74,7 +85,15 @@ interface SessionContextValue extends SessionState {
   submitStudentQuiz: (topic: string, answers: Record<number, string>, questions: QuizQuestion[]) => Promise<QuizSubmission>
   assignRecommendation: (recId: string) => void
   resetToDefaults: () => void
-  syncAuthenticatedUser: (authUser: { id?: string; name?: string; email?: string; role?: string; institutionName?: string }) => void
+  syncAuthenticatedUser: (authUser: {
+    id?: string
+    name?: string
+    email?: string
+    role?: string
+    institutionName?: string
+    className?: string
+    subject?: string
+  }) => void
 }
 
 const STORAGE_KEY = 'teachai_session_data_v2'
@@ -103,6 +122,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       },
       students: initialStudents,
       studentUser: initialStudentUser,
+      teacherUser: {
+        name: 'Dr. Priya Menon',
+        email: 'priya.menon@school.edu',
+        subject: 'Database Management Systems',
+        className: 'DBMS - III CSE A',
+        institutionName: 'M. Kumarasamy College of Engineering',
+      },
       studentQuizResults: initialStudents[0].quizHistory,
       latestQuizSubmission: null,
       teacherRecommendations: initialRecommendations,
@@ -124,7 +150,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   // Real-time synchronization with active server session
   const syncAuthenticatedUser = React.useCallback(
-    (authUser: { id?: string; name?: string; email?: string; role?: string; institutionName?: string }) => {
+    (authUser: {
+      id?: string
+      name?: string
+      email?: string
+      role?: string
+      institutionName?: string
+      className?: string
+      subject?: string
+    }) => {
       if (!authUser || !authUser.name) return
       setState((prev) => ({
         ...prev,
@@ -135,6 +169,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           email: authUser.email || prev.studentUser.email,
           role: authUser.role || prev.studentUser.role,
           institutionName: authUser.institutionName || 'M. Kumarasamy College of Engineering',
+        },
+        teacherUser: {
+          ...prev.teacherUser,
+          id: authUser.id,
+          name: authUser.name!,
+          email: authUser.email || prev.teacherUser.email,
+          role: authUser.role || prev.teacherUser.role,
+          institutionName: authUser.institutionName || 'M. Kumarasamy College of Engineering',
+          className: authUser.className || prev.teacherUser.className,
+          subject: authUser.subject || prev.teacherUser.subject,
         },
       }))
     },
@@ -555,6 +599,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       },
       students: initialStudents,
       studentUser: initialStudentUser,
+      teacherUser: {
+        name: 'Dr. Priya Menon',
+        email: 'priya.menon@school.edu',
+        subject: 'Database Management Systems',
+        className: 'DBMS - III CSE A',
+        institutionName: 'M. Kumarasamy College of Engineering',
+      },
       studentQuizResults: initialStudents[0].quizHistory,
       latestQuizSubmission: null,
       teacherRecommendations: initialRecommendations,

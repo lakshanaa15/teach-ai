@@ -17,16 +17,24 @@ import { PageHeader } from '@/components/shared/page-header'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { teacher } from '@/lib/mock-data'
+import { useAppSession } from '@/lib/session-context'
 import { useToast } from '@/components/shared/toast'
 
 export default function TeacherSettingsPage() {
   const { toast } = useToast()
+  const { teacherUser } = useAppSession()
 
-  const [name, setName] = React.useState(teacher.name)
-  const [email, setEmail] = React.useState(teacher.email)
-  const [subject, setSubject] = React.useState(teacher.subject)
-  const [className, setClassName] = React.useState(teacher.className)
+  const [name, setName] = React.useState(teacherUser.name)
+  const [email, setEmail] = React.useState(teacherUser.email)
+  const [subject, setSubject] = React.useState(teacherUser.subject)
+  const [className, setClassName] = React.useState(teacherUser.className)
+
+  React.useEffect(() => {
+    if (teacherUser.name) setName(teacherUser.name)
+    if (teacherUser.email) setEmail(teacherUser.email)
+    if (teacherUser.subject) setSubject(teacherUser.subject)
+    if (teacherUser.className) setClassName(teacherUser.className)
+  }, [teacherUser])
 
   // AI & Pedagogical preferences
   const [autoAdaptive, setAutoAdaptive] = React.useState(true)

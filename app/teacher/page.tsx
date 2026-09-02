@@ -51,6 +51,7 @@ export default function TeacherDashboard() {
     selectedTopic,
     approvalStatuses,
     resetToDefaults,
+    teacherUser,
   } = useAppSession()
 
   const [classes, setClasses] = React.useState<TeacherClass[]>([
@@ -126,8 +127,8 @@ export default function TeacherDashboard() {
     <div className="space-y-8">
       {/* Header with Welcome and Quick Actions */}
       <PageHeader
-        title={`Welcome back, ${teacher.name}`}
-        description={`${teacher.className} · ${teacher.subject} · M. Kumarasamy College of Engineering (MKCE)`}
+        title={`Welcome back, ${teacherUser.name}`}
+        description={`${teacherUser.className} · ${teacherUser.subject} · ${teacherUser.institutionName || 'M. Kumarasamy College of Engineering (MKCE)'}`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button
