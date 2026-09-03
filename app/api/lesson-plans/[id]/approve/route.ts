@@ -29,6 +29,21 @@ export async function POST(
       },
     })
 
+    // Also approve associated draft quiz for this topic & class
+    if (updated.teacherId && updated.classId) {
+      await prisma.quiz.updateMany({
+        where: {
+          teacherId: updated.teacherId,
+          classId: updated.classId,
+          topic: updated.topic,
+          status: 'Draft',
+        },
+        data: {
+          status: 'Approved',
+        },
+      })
+    }
+
     return NextResponse.json({ success: true, lessonPlan: updated })
   } catch (error) {
     console.error('[APPROVE LESSON PLAN ERROR]:', error)

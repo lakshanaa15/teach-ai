@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import {
   AlertCircle,
   ArrowRight,
+  Eye,
+  EyeOff,
   GraduationCap,
   Lock,
   Mail,
@@ -25,6 +27,7 @@ function StudentLoginForm() {
 
   const [email, setEmail] = React.useState('')
   const [password, setPassword] = React.useState('')
+  const [showPassword, setShowPassword] = React.useState(false)
   const [isLoading, setIsLoading] = React.useState(false)
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
 
@@ -67,14 +70,19 @@ function StudentLoginForm() {
   }
 
   return (
-    <Card className="border-border shadow-xl">
-      <CardHeader className="space-y-2 border-b border-border/60 pb-5 bg-muted/20">
-        <div className="flex items-center gap-2.5">
-          <div className="flex size-10 items-center justify-center rounded-xl bg-chart-2/10 text-chart-2">
-            <Users className="size-5" />
+    <Card className="border-border shadow-xl bg-card rounded-2xl overflow-hidden">
+      <CardHeader className="space-y-2 border-b border-border/60 p-6 bg-gradient-to-br from-chart-2/5 via-background to-transparent">
+        <div className="flex items-center gap-3">
+          <div className="flex size-11 items-center justify-center rounded-xl bg-chart-2/10 text-chart-2 shadow-sm">
+            <Users className="size-6" />
           </div>
           <div>
-            <CardTitle className="text-xl font-bold">Student Sign In</CardTitle>
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-xl font-bold">Student Portal Sign In</CardTitle>
+              <Badge variant="secondary" className="text-[10px]">
+                Student
+              </Badge>
+            </div>
             <p className="text-xs text-muted-foreground">M. Kumarasamy College of Engineering</p>
           </div>
         </div>
@@ -90,8 +98,8 @@ function StudentLoginForm() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Student Email
+            <label className="text-xs font-semibold text-foreground">
+              Student Email Address
             </label>
             <div className="relative">
               <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -100,33 +108,41 @@ function StudentLoginForm() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="e.g. alex.rivera@school.edu"
-                className="h-10 w-full rounded-xl border border-input bg-card pl-9 pr-3 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-2"
+                placeholder="alex.rivera@school.edu"
+                className="h-10 w-full rounded-xl border border-input bg-card pl-9 pr-3 text-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-2"
               />
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <label className="text-xs font-semibold text-foreground">
               Password
             </label>
             <div className="relative">
               <Lock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <input
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="h-10 w-full rounded-xl border border-input bg-card pl-9 pr-3 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-2"
+                className="h-10 w-full rounded-xl border border-input bg-card pl-9 pr-10 text-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-2"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
             </div>
           </div>
 
           <Button
             type="submit"
             disabled={isLoading}
-            className="w-full gap-2 shadow-md h-10 mt-2"
+            className="w-full gap-2 shadow-md h-10 mt-2 font-semibold text-xs"
           >
             {isLoading ? 'Signing in…' : 'Sign in to Student Portal'}
             <ArrowRight className="size-4" />

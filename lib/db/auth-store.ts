@@ -36,6 +36,15 @@ export interface StudentRecord {
   createdAt: Date
 }
 
+export interface ClassTopicRecord {
+  id: string
+  classId: string
+  title: string
+  order: number
+  isActive: boolean
+  createdAt: Date
+}
+
 export interface ClassRecord {
   id: string
   name: string
@@ -43,7 +52,12 @@ export interface ClassRecord {
   teacherId: string
   institutionId: string
   subject?: string
+  subjectCode?: string
+  academicYear?: string
+  department?: string
+  section?: string
   description?: string
+  topics?: ClassTopicRecord[]
   createdAt: Date
 }
 
@@ -271,8 +285,8 @@ class AuthStore {
                   teacherProfile: {
                     create: {
                       institutionId: validInstitutionId,
-                      subject: params.subject?.trim() || 'Database Management Systems',
-                      className: params.className?.trim() || 'DBMS - III CSE A',
+                      subject: params.subject?.trim() || null,
+                      className: params.className?.trim() || null,
                     },
                   },
                 }
@@ -393,19 +407,26 @@ class AuthStore {
 
   // Class Management
   async createClass(params: {
-    name: string
+    name?: string
     teacherId: string
     institutionId: string
     subject?: string
+    subjectCode?: string
+    academicYear?: string
+    department?: string
+    section?: string
     description?: string
+    classCode?: string
+    initialTopics?: Array<string | { title: string }>
   }): Promise<ClassRecord> {
-    // Generate clean unique class code, e.g. "DBMS3A26"
-    const prefix = params.name
-      .replace(/[^a-zA-Z0-9]/g, '')
-      .substring(0, 4)
-      .toUpperCase() || 'CLS'
-    const suffix = Math.random().toString(36).substring(2, 6).toUpperCase()
-    const classCode = `${prefix}${suffix}`
+    const computedName =
+      params.name?.trim() ||
+      `${params.academicYear || ''} ${params.department || ''} ${params.section || ''}`.trim() ||
+      'New Class'
+
+    const classCode =
+      params.classCode?.trim().toUpperCase() ||
+      `${computedName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 4).toUpperCase() || 'CLS'}${Math.random().toString(36).substring(2, 6).toUpperCase()}`
 
     const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
     if (isDbConfigured) {
@@ -416,12 +437,30 @@ class AuthStore {
       try {
         const created = await prisma.class.create({
           data: {
-            name: params.name,
+            name: computedName,
             classCode,
             teacherId: params.teacherId,
             institutionId: params.institutionId,
-            subject: params.subject,
-            description: params.description,
+            subject: params.subject?.trim() || undefined,
+            subjectCode: params.subjectCode?.trim() || undefined,
+            academicYear: params.academicYear?.trim() || 'III Year',
+            department: params.department?.trim() || 'CSE',
+            section: params.section?.trim() || 'A',
+            description: params.description?.trim() || undefined,
+            ...(params.initialTopics && params.initialTopics.length > 0
+              ? {
+                  topics: {
+                    create: params.initialTopics.map((t, idx) => ({
+                      title: typeof t === 'string' ? t.trim() : t.title.trim(),
+                      order: idx + 1,
+                      isActive: true,
+                    })),
+                  },
+                }
+              : {}),
+          },
+          include: {
+            topics: { orderBy: { order: 'asc' } },
           },
         })
         return created as any
@@ -433,16 +472,190 @@ class AuthStore {
 
     const cls: ClassRecord = {
       id: `cls-${Date.now()}`,
-      name: params.name,
+      name: computedName,
       classCode,
       teacherId: params.teacherId,
       institutionId: params.institutionId,
       subject: params.subject,
+      subjectCode: params.subjectCode,
+      academicYear: params.academicYear || 'III Year',
+      department: params.department || 'CSE',
+      section: params.section || 'A',
       description: params.description,
+      topics: (params.initialTopics || []).map((t, idx) => ({
+        id: `top-${Date.now()}-${idx}`,
+        classId: `cls-${Date.now()}`,
+        title: typeof t === 'string' ? t : t.title,
+        order: idx + 1,
+        isActive: true,
+        createdAt: new Date(),
+      })),
       createdAt: new Date(),
     }
     this.classes.set(cls.id, cls)
     return cls
+  }
+
+  async updateClass(
+    classId: string,
+    data: {
+      name?: string
+      subject?: string
+      subjectCode?: string
+      academicYear?: string
+      department?: string
+      section?: string
+      description?: string
+    },
+  ): Promise<ClassRecord | null> {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) throw new Error('Database unavailable')
+      const updated = await prisma.class.update({
+        where: { id: classId },
+        data: {
+          name: data.name?.trim(),
+          subject: data.subject?.trim(),
+          subjectCode: data.subjectCode?.trim(),
+          academicYear: data.academicYear?.trim(),
+          department: data.department?.trim(),
+          section: data.section?.trim(),
+          description: data.description?.trim(),
+        },
+        include: {
+          topics: { orderBy: { order: 'asc' } },
+        },
+      })
+      return updated as any
+    }
+    const existing = this.classes.get(classId)
+    if (!existing) return null
+    const merged: ClassRecord = {
+      ...existing,
+      ...data,
+      name: data.name || existing.name,
+    }
+    this.classes.set(classId, merged)
+    return merged
+  }
+
+  async deleteClass(classId: string, teacherId: string): Promise<boolean> {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) throw new Error('Database unavailable')
+      await prisma.class.deleteMany({
+        where: { id: classId, teacherId },
+      })
+      return true
+    }
+    const existing = this.classes.get(classId)
+    if (existing && existing.teacherId === teacherId) {
+      this.classes.delete(classId)
+      return true
+    }
+    return false
+  }
+
+  // Topic / Syllabus Management
+  async listClassTopics(classId: string): Promise<ClassTopicRecord[]> {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) throw new Error('Database unavailable')
+      const topics = await prisma.classTopic.findMany({
+        where: { classId },
+        orderBy: { order: 'asc' },
+      })
+      return topics as any
+    }
+    const cls = this.classes.get(classId)
+    return cls?.topics || []
+  }
+
+  async addClassTopic(classId: string, title: string, order?: number): Promise<ClassTopicRecord> {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) throw new Error('Database unavailable')
+      const topicCount = await prisma.classTopic.count({ where: { classId } })
+      const topic = await prisma.classTopic.create({
+        data: {
+          classId,
+          title: title.trim(),
+          order: order !== undefined ? order : topicCount + 1,
+          isActive: true,
+        },
+      })
+      return topic as any
+    }
+    const cls = this.classes.get(classId)
+    const newTopic: ClassTopicRecord = {
+      id: `top-${Date.now()}`,
+      classId,
+      title: title.trim(),
+      order: order !== undefined ? order : (cls?.topics?.length || 0) + 1,
+      isActive: true,
+      createdAt: new Date(),
+    }
+    if (cls) {
+      if (!cls.topics) cls.topics = []
+      cls.topics.push(newTopic)
+    }
+    return newTopic
+  }
+
+  async updateClassTopic(
+    topicId: string,
+    data: { title?: string; order?: number; isActive?: boolean },
+  ): Promise<ClassTopicRecord | null> {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) throw new Error('Database unavailable')
+      const updated = await prisma.classTopic.update({
+        where: { id: topicId },
+        data: {
+          ...(data.title ? { title: data.title.trim() } : {}),
+          ...(data.order !== undefined ? { order: data.order } : {}),
+          ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
+        },
+      })
+      return updated as any
+    }
+    for (const cls of this.classes.values()) {
+      if (cls.topics) {
+        const found = cls.topics.find((t) => t.id === topicId)
+        if (found) {
+          if (data.title) found.title = data.title.trim()
+          if (data.order !== undefined) found.order = data.order
+          if (data.isActive !== undefined) found.isActive = data.isActive
+          return found
+        }
+      }
+    }
+    return null
+  }
+
+  async deleteClassTopic(topicId: string): Promise<boolean> {
+    const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
+    if (isDbConfigured) {
+      const prisma = getPrisma()
+      if (!prisma) throw new Error('Database unavailable')
+      await prisma.classTopic.delete({ where: { id: topicId } })
+      return true
+    }
+    for (const cls of this.classes.values()) {
+      if (cls.topics) {
+        const idx = cls.topics.findIndex((t) => t.id === topicId)
+        if (idx !== -1) {
+          cls.topics.splice(idx, 1)
+          return true
+        }
+      }
+    }
+    return false
   }
 
   async findClassByCode(classCode: string): Promise<(ClassRecord & { teacherName?: string }) | null> {
@@ -461,6 +674,7 @@ class AuthStore {
             teacher: {
               include: { user: true },
             },
+            topics: { orderBy: { order: 'asc' } },
           },
         })
         if (!cls) return null
@@ -471,7 +685,12 @@ class AuthStore {
           teacherId: cls.teacherId,
           institutionId: cls.institutionId,
           subject: cls.subject || undefined,
+          subjectCode: cls.subjectCode || undefined,
+          academicYear: cls.academicYear || undefined,
+          department: cls.department || undefined,
+          section: cls.section || undefined,
           description: cls.description || undefined,
+          topics: cls.topics as any,
           createdAt: cls.createdAt,
           teacherName: cls.teacher?.user?.name || 'Teacher unavailable',
         }
@@ -496,7 +715,7 @@ class AuthStore {
 
   async listClassesByTeacherId(
     teacherId: string,
-  ): Promise<Array<ClassRecord & { studentCount: number }>> {
+  ): Promise<Array<ClassRecord & { studentCount: number; lessonsCount?: number; quizzesCount?: number }>> {
     const isDbConfigured = Boolean(process.env.DATABASE_URL || process.env.DIRECT_URL)
     if (isDbConfigured) {
       const prisma = getPrisma()
@@ -507,8 +726,13 @@ class AuthStore {
         const classes = await prisma.class.findMany({
           where: { teacherId },
           include: {
+            topics: { orderBy: { order: 'asc' } },
             _count: {
-              select: { enrollments: true },
+              select: {
+                enrollments: true,
+                lessonPlans: true,
+                quizzes: true,
+              },
             },
           },
           orderBy: { createdAt: 'desc' },
@@ -516,6 +740,8 @@ class AuthStore {
         return classes.map((c: any) => ({
           ...c,
           studentCount: c._count?.enrollments ?? 0,
+          lessonsCount: c._count?.lessonPlans ?? 0,
+          quizzesCount: c._count?.quizzes ?? 0,
         }))
       } catch (e) {
         console.error('[AUTH-STORE] Prisma listClassesByTeacherId error:', e instanceof Error ? e.message : String(e))
@@ -523,14 +749,14 @@ class AuthStore {
       }
     }
 
-    const results: Array<ClassRecord & { studentCount: number }> = []
+    const results: Array<ClassRecord & { studentCount: number; lessonsCount?: number; quizzesCount?: number }> = []
     for (const c of this.classes.values()) {
       if (c.teacherId === teacherId) {
         let count = 0
         for (const enr of this.enrollments.values()) {
           if (enr.classId === c.id) count++
         }
-        results.push({ ...c, studentCount: count || (c.classCode === 'DBMS3A26' ? 32 : 0) })
+        results.push({ ...c, studentCount: count, lessonsCount: 0, quizzesCount: 0 })
       }
     }
     return results

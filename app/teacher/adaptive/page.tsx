@@ -50,6 +50,40 @@ export default function AdaptivePage() {
   const [tracks, setTracks] = React.useState<AdaptiveTrack[]>([])
   const [editingTrack, setEditingTrack] = React.useState<AdaptiveTrack | null>(null)
   const [previewTrack, setPreviewTrack] = React.useState<AdaptiveTrack | null>(null)
+  const [classTopics, setClassTopics] = React.useState<string[]>([])
+
+  // Load teacher class topics
+  React.useEffect(() => {
+    fetch('/api/classes')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.classes && data.classes.length > 0) {
+          const allTopics: string[] = []
+          data.classes.forEach((c: any) => {
+            if (Array.isArray(c.topics)) {
+              c.topics.forEach((t: any) => {
+                const title = typeof t === 'string' ? t : t.title
+                if (title && !allTopics.includes(title)) allTopics.push(title)
+              })
+            }
+          })
+          if (allTopics.length > 0) {
+            setClassTopics(allTopics)
+            const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+            const topicParam = urlParams?.get('topic')
+            if (topicParam && allTopics.includes(topicParam)) {
+              setSelectedTopic(topicParam)
+            } else if (topicParam) {
+              setClassTopics([topicParam, ...allTopics])
+              setSelectedTopic(topicParam)
+            } else if (!allTopics.includes(selectedTopic)) {
+              setSelectedTopic(allTopics[0])
+            }
+          }
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   const currentApproval = approvalStatuses[selectedTopic] || 'Pending Review'
 
@@ -58,11 +92,16 @@ export default function AdaptivePage() {
     loadTracks(selectedTopic)
   }, [selectedTopic])
 
-  const loadTracks = async (topic: string) => {
+  const loadTracks = async (topic: string, force = false) => {
     setIsLoading(true)
     try {
-      const generated = await getAdaptiveTracksForTopic(topic)
+      const generated = await getAdaptiveTracksForTopic(topic, undefined, force)
       setTracks(generated)
+    } catch (err) {
+      toast({
+        title: 'Adaptive Generation Failed ⚠️',
+        description: err instanceof Error ? err.message : 'Could not generate adaptive tracks with Gemini AI.',
+      })
     } finally {
       setIsLoading(false)
     }
@@ -104,18 +143,23 @@ export default function AdaptivePage() {
         description="Review AI-generated differentiated tracks. Verify and approve pedagogical content before assigning to learners."
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={selectedTopic}
-              onChange={(e) => setSelectedTopic(e.target.value)}
-              className="h-9 rounded-lg border border-input bg-card px-3 text-sm font-semibold outline-none transition-colors focus-visible:border-ring focus-visible:ring-2"
-            >
-              <option value="ER Model">ER Model — Entity, Attribute, Cardinality</option>
-              <option value="Trigonometric Identities">Trigonometric Identities</option>
-              <option value="Intro to Calculus">Intro to Calculus</option>
-              <option value="Quadratic Functions">Quadratic Functions</option>
-            </select>
+            {classTopics.length > 0 ? (
+              <select
+                value={selectedTopic}
+                onChange={(e) => setSelectedTopic(e.target.value)}
+                className="h-9 rounded-lg border border-input bg-card px-3 text-sm font-semibold outline-none transition-colors focus-visible:border-ring focus-visible:ring-2"
+              >
+                {classTopics.map((top) => (
+                  <option key={top} value={top}>
+                    {top}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-xs font-semibold px-2">{selectedTopic}</span>
+            )}
             <Button
-              onClick={() => loadTracks(selectedTopic)}
+              onClick={() => loadTracks(selectedTopic, true)}
               disabled={isLoading}
               variant="outline"
               className="gap-2 text-xs"
@@ -249,12 +293,54 @@ export default function AdaptivePage() {
                       </ul>
                     </div>
 
+                    {/* Remedial Scaffolding & Misconceptions */}
+                    {track.level === 'Remedial' && (
+                      <div className="space-y-2">
+                        {track.supportStrategies && track.supportStrategies.length > 0 && (
+                          <div className="rounded-lg border border-warning/30 bg-warning/[0.03] p-3 text-xs">
+                            <h4 className="font-semibold text-warning-foreground mb-1">
+                              Scaffolding & Support Strategies:
+                            </h4>
+                            <ul className="space-y-1 text-muted-foreground">
+                              {track.supportStrategies.map((s, idx) => (
+                                <li key={idx} className="flex items-start gap-1.5">
+                                  <span className="text-warning-foreground font-bold">•</span>
+                                  <span>{s}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Advanced Challenge Extensions */}
+                    {track.level === 'Advanced' && (
+                      <div className="space-y-2">
+                        {track.challengeQuestions && track.challengeQuestions.length > 0 && (
+                          <div className="rounded-lg border border-success/30 bg-success/[0.03] p-3 text-xs">
+                            <h4 className="font-semibold text-success mb-1">
+                              High-Order Challenge Problems:
+                            </h4>
+                            <ul className="space-y-1 text-muted-foreground">
+                              {track.challengeQuestions.map((c, idx) => (
+                                <li key={idx} className="flex items-start gap-1.5">
+                                  <span className="text-success font-bold">•</span>
+                                  <span>{c}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Worked Example */}
                     <div className="rounded-lg border border-border/80 bg-card p-3">
                       <h4 className="text-xs font-semibold text-foreground">
                         Worked Demonstration:
                       </h4>
-                      <p className="mt-1 text-xs text-muted-foreground">{track.example}</p>
+                      <p className="mt-1 text-xs text-muted-foreground whitespace-pre-line">{track.example}</p>
                     </div>
 
                     {/* Practice Set */}
@@ -262,7 +348,7 @@ export default function AdaptivePage() {
                       <h4 className="text-xs font-semibold text-foreground">
                         Practice Assessment:
                       </h4>
-                      <p className="mt-1 text-xs text-muted-foreground">{track.practice}</p>
+                      <p className="mt-1 text-xs text-muted-foreground whitespace-pre-line">{track.practice}</p>
                     </div>
                   </CardContent>
                 </div>

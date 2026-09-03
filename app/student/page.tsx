@@ -8,8 +8,11 @@ import {
   ArrowRight,
   BookOpen,
   Boxes,
+  Check,
   CheckCircle2,
   Clock,
+  Eye,
+  FileText,
   Flame,
   GraduationCap,
   Lightbulb,
@@ -57,18 +60,41 @@ export default function StudentDashboard() {
     message: string
   } | null>(null)
   const [enrolledClasses, setEnrolledClasses] = React.useState<EnrolledClass[]>([])
+  const [publishedLessons, setPublishedLessons] = React.useState<any[]>([])
+  const [isLoadingLessons, setIsLoadingLessons] = React.useState(true)
 
-  // Fetch student enrolled classes
+  // Fetch student enrolled classes & lessons
   React.useEffect(() => {
-    fetch('/api/classes/enrolled')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.success && Array.isArray(data.classes)) {
-          setEnrolledClasses(data.classes)
-        }
-      })
-      .catch(() => {})
+    fetchEnrolledClasses()
+    fetchLessons()
   }, [])
+
+  const fetchEnrolledClasses = async () => {
+    try {
+      const res = await fetch('/api/classes/enrolled')
+      const data = await res.json()
+      if (data?.success && Array.isArray(data.classes)) {
+        setEnrolledClasses(data.classes)
+      }
+    } catch {}
+  }
+
+  const fetchLessons = async () => {
+    setIsLoadingLessons(true)
+    try {
+      const res = await fetch('/api/lesson-plans')
+      const data = await res.json()
+      if (res.ok && Array.isArray(data.lessonPlans)) {
+        setPublishedLessons(data.lessonPlans)
+      } else {
+        setPublishedLessons([])
+      }
+    } catch {
+      setPublishedLessons([])
+    } finally {
+      setIsLoadingLessons(false)
+    }
+  }
 
   const handleJoinClass = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -101,6 +127,8 @@ export default function StudentDashboard() {
           data.class,
           ...prev.filter((c) => c.id !== data.class.id),
         ])
+        // Refresh published lessons for the newly joined class
+        fetchLessons()
       }
       setClassCodeInput('')
     } catch {
@@ -113,15 +141,20 @@ export default function StudentDashboard() {
     }
   }
 
-  const currentStudent = students[0] // Alex Rivera
-  const isDBMS = selectedTopic.toLowerCase().includes('er') || selectedTopic.toLowerCase().includes('dbms')
+  const currentStudent = students[0] || { level: 'Standard' }
+  const activeSubject = enrolledClasses[0]?.subject || studentUser.currentSubject || 'Computer Science'
+  const activeClassHeader = enrolledClasses.map((c) => `${c.name} (${c.subject || 'General'})`).join(' • ')
 
   return (
     <div className="space-y-8">
       {/* Header */}
       <PageHeader
         title={`Welcome back, ${studentUser.name}!`}
-        description={`Grade 10 · ${studentUser.currentSubject} · M. Kumarasamy College of Engineering (MKCE) · You're on a ${studentUser.streak}-day learning streak 🔥`}
+        description={
+          enrolledClasses.length > 0
+            ? `${activeClassHeader} · ${studentUser.institutionName || 'Institutional Campus'}`
+            : `Join your class using a class code from your teacher to unlock lessons and quizzes · ${studentUser.institutionName || 'Institutional Campus'}`
+        }
         actions={
           <div className="flex items-center gap-2">
             <Link href="/student/tutor">
@@ -231,32 +264,112 @@ export default function StudentDashboard() {
         </CardContent>
       </Card>
 
+      {/* ASSIGNED LESSONS & AVAILABLE QUIZZES STATUS CARDS */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <BookOpen className="size-5 text-primary" />
+            <h3 className="font-display text-base font-bold text-foreground">
+              My Assigned Lessons & Handouts
+            </h3>
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {publishedLessons.length} published lesson{publishedLessons.length === 1 ? '' : 's'}
+          </span>
+        </div>
+
+        {isLoadingLessons ? (
+          <div className="grid gap-4 sm:grid-cols-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-44 rounded-xl border border-border bg-card p-4 animate-pulse" />
+            ))}
+          </div>
+        ) : publishedLessons.length === 0 ? (
+          <Card className="border-dashed border-2 border-border p-8 text-center">
+            <BookOpen className="mx-auto size-8 text-muted-foreground/50 mb-2" />
+            <p className="font-semibold text-xs text-foreground">No published lessons yet</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {enrolledClasses.length === 0
+                ? 'Join a class using your teacher’s class code above to access lessons and quizzes.'
+                : 'Your teacher has not published lessons for your enrolled classes yet.'}
+            </p>
+          </Card>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-3">
+            {publishedLessons.map((plan) => (
+              <Card
+                key={plan.id}
+                className="flex flex-col justify-between border-border bg-card p-4 transition-all hover:border-primary/40 hover:shadow-sm"
+              >
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Badge variant="success" className="text-[10px] uppercase font-bold">
+                      Published
+                    </Badge>
+                    <span className="text-[11px] font-mono text-muted-foreground">
+                      {plan.duration || '45 mins'}
+                    </span>
+                  </div>
+                  <h4 className="font-bold text-sm text-foreground">{plan.title}</h4>
+                  <p className="text-xs text-muted-foreground line-clamp-2">
+                    {plan.subject} • Topic: <strong className="text-foreground">{plan.topic}</strong>
+                  </p>
+                  {plan.materials && plan.materials.length > 0 && (
+                    <div className="pt-1 flex items-center gap-1.5 text-[11px] text-primary">
+                      <FileText className="size-3" />
+                      <span>
+                        {plan.materials.length} PDF Handout{plan.materials.length > 1 ? 's' : ''}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-border/60 flex flex-col gap-2">
+                  <Link href={`/student/learning?topic=${encodeURIComponent(plan.topic)}`}>
+                    <Button size="sm" className="w-full gap-1.5 text-xs font-semibold">
+                      <Play className="size-3.5 fill-current" /> Start Lesson
+                    </Button>
+                  </Link>
+                  {plan.materials && plan.materials.length > 0 && plan.materials[0].fileUrl && (
+                    <a
+                      href={plan.materials[0].fileUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-1 text-[11px] font-semibold text-muted-foreground hover:text-primary py-1"
+                    >
+                      <Eye className="size-3" /> View Handout PDF
+                    </a>
+                  )}
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Hero Continue Learning Card */}
       <Card className="border-primary/40 bg-gradient-to-br from-primary/10 via-background to-chart-2/5 shadow-sm">
         <CardContent className="flex flex-col gap-6 p-6 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <Badge variant="default" className="text-xs">
-                Active Assigned Learning Pathway
+              <Badge variant="default" className="text-xs font-bold">
+                Active Learning Track
               </Badge>
-              <LevelBadge level={currentStudent.level} />
+              <LevelBadge level={currentStudent.level as any} />
               <Badge variant="outline" className="text-xs font-mono">
-                Assigned by Teacher
+                {enrolledClasses[0]?.name || 'Enrolled Class'}
               </Badge>
             </div>
             <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">
-              {isDBMS
-                ? 'ER Model — Entity, Attribute & Cardinality Constraints'
-                : 'Trigonometric Identities — Foundations Track'}
+              {publishedLessons[0]?.title || (selectedTopic ? `${selectedTopic} — Core Concepts` : 'Core Learning Curriculum')}
             </h2>
             <p className="max-w-xl text-sm text-muted-foreground text-pretty">
-              {isDBMS
-                ? 'Master Crow’s Foot and Chen notation, 1:1, 1:N, and M:N cardinality, and relational table mapping with interactive demonstrations.'
-                : 'Your last check showed a slight gap in unit circle Pythagorean derivations. This 15-minute interactive lesson will get you right back on track.'}
+              {publishedLessons[0]?.learningObjective ||
+                'Master core principles, interactive practice exercises, and formative gap diagnostics guided by your faculty curriculum.'}
             </p>
             <div className="flex items-center gap-4 text-xs text-muted-foreground pt-1">
               <span className="flex items-center gap-1">
-                <Clock className="size-3.5" /> 15 min estimated
+                <Clock className="size-3.5" /> {publishedLessons[0]?.duration || '15 min estimated'}
               </span>
               <span>•</span>
               <span>3 interactive steps + 1 check quiz</span>
@@ -265,13 +378,13 @@ export default function StudentDashboard() {
 
           <div className="flex flex-col gap-2 shrink-0">
             <Link href={`/student/learning?topic=${encodeURIComponent(selectedTopic)}`}>
-              <Button size="lg" className="w-full gap-2 shadow-md sm:w-auto">
+              <Button size="lg" className="w-full gap-2 shadow-md sm:w-auto font-semibold text-xs">
                 <Play className="size-4 fill-current" />
                 Continue Adaptive Lesson
               </Button>
             </Link>
             <Link href="/student/quizzes">
-              <Button size="sm" variant="outline" className="w-full gap-1.5 sm:w-auto">
+              <Button size="sm" variant="outline" className="w-full gap-1.5 sm:w-auto text-xs">
                 Take Formative Quiz
                 <ArrowRight className="size-3.5" />
               </Button>

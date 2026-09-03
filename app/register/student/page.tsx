@@ -8,6 +8,8 @@ import {
   ArrowRight,
   Building,
   CheckCircle2,
+  Eye,
+  EyeOff,
   GraduationCap,
   Lock,
   Mail,
@@ -25,6 +27,7 @@ export default function StudentRegisterPage() {
   const [email, setEmail] = React.useState('')
   const [password, setPassword] = React.useState('')
   const [confirmPassword, setConfirmPassword] = React.useState('')
+  const [showPassword, setShowPassword] = React.useState(false)
   const [institutionCode, setInstitutionCode] = React.useState('MKCE2026')
 
   const [isLoading, setIsLoading] = React.useState(false)
@@ -162,35 +165,43 @@ export default function StudentRegisterPage() {
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
-                    <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    <label className="text-xs font-semibold text-foreground">
                       Password
                     </label>
                     <div className="relative">
                       <Lock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                       <input
-                        type="password"
+                        type={showPassword ? 'text' : 'password'}
                         required
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         placeholder="••••••••"
-                        className="h-10 w-full rounded-xl border border-input bg-card pl-9 pr-3 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-2"
+                        className="h-10 w-full rounded-xl border border-input bg-card pl-9 pr-10 text-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-2"
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                      </button>
                     </div>
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    <label className="text-xs font-semibold text-foreground">
                       Confirm Password
                     </label>
                     <div className="relative">
                       <Lock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                       <input
-                        type="password"
+                        type={showPassword ? 'text' : 'password'}
                         required
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
                         placeholder="••••••••"
-                        className="h-10 w-full rounded-xl border border-input bg-card pl-9 pr-3 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-2"
+                        className="h-10 w-full rounded-xl border border-input bg-card pl-9 pr-10 text-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-2"
                       />
                     </div>
                   </div>

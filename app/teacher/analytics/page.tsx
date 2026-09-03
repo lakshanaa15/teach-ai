@@ -31,9 +31,10 @@ export default function AnalyticsPage() {
   const { toast } = useToast()
   const { students, topicMastery, selectedTopic } = useAppSession()
 
-  const avgMastery = Math.round(
-    students.reduce((acc, s) => acc + s.overallScore, 0) / students.length,
-  )
+  const avgMastery =
+    students.length > 0
+      ? Math.round(students.reduce((acc, s) => acc + s.overallScore, 0) / students.length)
+      : 0
 
   const learningGaps = [
     {
@@ -256,33 +257,39 @@ export default function AnalyticsPage() {
             </Link>
           </CardHeader>
           <CardContent className="space-y-3 pt-4">
-            {atRiskStudents.map((s) => (
-              <div
-                key={s.id}
-                className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-3 text-xs"
-              >
-                <div>
-                  <p className="font-semibold text-foreground">{s.name}</p>
-                  <p className="text-muted-foreground">
-                    Score: <strong className="text-foreground">{s.overallScore}%</strong> · Weak in{' '}
-                    {s.weakTopics.join(', ')}
-                  </p>
-                </div>
-                <Button
-                  size="xs"
-                  onClick={() =>
-                    toast({
-                      title: `Intervention scheduled for ${s.name}`,
-                      description: 'Remedial track and 1-on-1 support dispatched.',
-                    })
-                  }
-                  className="gap-1 text-xs shrink-0"
-                >
-                  <Sparkles className="size-3" />
-                  Intervene
-                </Button>
+            {atRiskStudents.length === 0 ? (
+              <div className="p-6 text-center text-xs text-muted-foreground border border-dashed rounded-lg">
+                No students currently require priority interventions in this class.
               </div>
-            ))}
+            ) : (
+              atRiskStudents.map((s) => (
+                <div
+                  key={s.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-3 text-xs"
+                >
+                  <div>
+                    <p className="font-semibold text-foreground">{s.name}</p>
+                    <p className="text-muted-foreground">
+                      Score: <strong className="text-foreground">{s.overallScore}%</strong> · Weak in{' '}
+                      {s.weakTopics.join(', ')}
+                    </p>
+                  </div>
+                  <Button
+                    size="xs"
+                    onClick={() =>
+                      toast({
+                        title: `Intervention scheduled for ${s.name}`,
+                        description: 'Remedial track and 1-on-1 support dispatched.',
+                      })
+                    }
+                    className="gap-1 text-xs shrink-0"
+                  >
+                    <Sparkles className="size-3" />
+                    Intervene
+                  </Button>
+                </div>
+              ))
+            )}
           </CardContent>
         </Card>
 

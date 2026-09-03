@@ -15,6 +15,7 @@ import {
   Mail,
   Plus,
   Rocket,
+  School,
   Search,
   Sparkles,
   TrendingDown,
@@ -43,11 +44,50 @@ export default function StudentsPage() {
   const [selectedLevel, setSelectedLevel] = React.useState<string>('All')
   const [selectedStudent, setSelectedStudent] = React.useState<Student | null>(null)
 
-  const filteredStudents = students.filter((s) => {
+  // Real Database Class & Student Data
+  const [classes, setClasses] = React.useState<any[]>([])
+  const [selectedClassId, setSelectedClassId] = React.useState<string>('All')
+  const [realStudents, setRealStudents] = React.useState<Student[]>([])
+  const [isLoading, setIsLoading] = React.useState<boolean>(true)
+
+  React.useEffect(() => {
+    fetch('/api/classes')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.classes) setClasses(data.classes)
+      })
+      .catch(() => {})
+  }, [])
+
+  React.useEffect(() => {
+    fetchStudents(selectedClassId)
+  }, [selectedClassId])
+
+  const fetchStudents = async (classId: string) => {
+    setIsLoading(true)
+    try {
+      const url = classId === 'All' ? '/api/students' : `/api/students?classId=${classId}`
+      const res = await fetch(url)
+      const data = await res.json()
+      if (res.ok && Array.isArray(data.students)) {
+        setRealStudents(data.students)
+      } else {
+        setRealStudents([])
+      }
+    } catch {
+      setRealStudents([])
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const activeStudentList = realStudents
+
+  const filteredStudents = activeStudentList.filter((s) => {
     const matchesSearch =
       s.name.toLowerCase().includes(search.toLowerCase()) ||
       s.email.toLowerCase().includes(search.toLowerCase()) ||
-      s.weakTopics.some((t) => t.toLowerCase().includes(search.toLowerCase()))
+      (s.weakTopics && s.weakTopics.some((t) => t.toLowerCase().includes(search.toLowerCase())))
     const matchesStatus = selectedStatus === 'All' || s.status === selectedStatus
     const matchesLevel = selectedLevel === 'All' || s.level === selectedLevel
     return matchesSearch && matchesStatus && matchesLevel
@@ -55,7 +95,7 @@ export default function StudentsPage() {
 
   // Keep selected student synced with live state updates
   const activeStudent = selectedStudent
-    ? students.find((s) => s.id === selectedStudent.id) || selectedStudent
+    ? activeStudentList.find((s) => s.id === selectedStudent.id) || selectedStudent
     : null
 
   return (
@@ -78,15 +118,32 @@ export default function StudentsPage() {
 
       {/* Filter and Search Bar */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative flex-1 max-w-md">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search student by name, email, or weak topic…"
-            className="h-9 w-full rounded-lg border border-input bg-card pl-9 pr-3 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/25"
-          />
+        <div className="flex flex-1 items-center gap-3 max-w-xl">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search student by name, email, or weak topic…"
+              className="h-9 w-full rounded-lg border border-input bg-card pl-9 pr-3 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/25"
+            />
+          </div>
+
+          {classes.length > 0 && (
+            <select
+              value={selectedClassId}
+              onChange={(e) => setSelectedClassId(e.target.value)}
+              className="h-9 rounded-lg border border-input bg-card px-2.5 text-xs font-semibold outline-none"
+            >
+              <option value="All">All Classes ({classes.length})</option>
+              {classes.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.studentCount || 0} students)
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -106,13 +163,38 @@ export default function StudentsPage() {
       </div>
 
       {/* Student Cards Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {filteredStudents.map((student) => (
-          <Card
-            key={student.id}
-            onClick={() => setSelectedStudent(student)}
-            className="group cursor-pointer transition-all hover:border-primary/50 hover:shadow-md"
-          >
+      {isLoading ? (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div key={i} className="h-44 rounded-xl border border-border bg-card p-5 animate-pulse" />
+          ))}
+        </div>
+      ) : filteredStudents.length === 0 ? (
+        <Card className="border-dashed border-2 border-border p-12 text-center">
+          <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary mb-4">
+            <Users className="size-7" />
+          </div>
+          <h3 className="font-display text-lg font-bold text-foreground">
+            No students have joined this class yet
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground max-w-md mx-auto">
+            Share your unique class code with students. Once students register and join, their diagnostics, cognitive tiers, and quiz performance will appear here automatically.
+          </p>
+          <Link href="/teacher/classes">
+            <Button size="sm" className="mt-5 gap-1.5 font-semibold">
+              <School className="size-4" />
+              View Class Codes
+            </Button>
+          </Link>
+        </Card>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {filteredStudents.map((student) => (
+            <Card
+              key={student.id}
+              onClick={() => setSelectedStudent(student)}
+              className="group cursor-pointer transition-all hover:border-primary/50 hover:shadow-md"
+            >
             <CardContent className="space-y-4 p-5">
               {/* Top Row: Avatar & Status */}
               <div className="flex items-start justify-between gap-3">
@@ -172,6 +254,7 @@ export default function StudentsPage() {
           </Card>
         ))}
       </div>
+      )}
 
       {/* Detailed Student Profile Drawer / Modal */}
       {activeStudent && (

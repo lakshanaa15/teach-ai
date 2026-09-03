@@ -1,14 +1,31 @@
 import { getPrisma } from '@/lib/db/prisma'
 import { materials as mockMaterials } from '@/lib/mock-data'
 import type { Material, MaterialAnalysis } from '@/lib/types'
-import { analyzeMaterial as aiAnalyzeMaterial } from '@/lib/ai-service'
+import { analyzeMaterialWithGemini } from '@/lib/gemini'
 import { extractTextFromFile } from './text-extractor'
 
-export async function listMaterials(): Promise<Material[]> {
+export async function listMaterials(options?: {
+  teacherId?: string
+  classId?: string
+  studentEnrolledClassIds?: string[]
+}): Promise<Material[]> {
   const prisma = getPrisma()
   if (prisma) {
     try {
+      const where: any = {}
+      if (options?.classId) {
+        where.classId = options.classId
+      } else if (options?.studentEnrolledClassIds && options.studentEnrolledClassIds.length > 0) {
+        where.OR = [
+          { classId: { in: options.studentEnrolledClassIds } },
+          { classId: null },
+        ]
+      } else if (options?.teacherId) {
+        where.teacherId = options.teacherId
+      }
+
       const records = await prisma.material.findMany({
+        where: Object.keys(where).length > 0 ? where : undefined,
         orderBy: { createdAt: 'desc' },
       })
       if (records && records.length > 0) {
@@ -21,6 +38,9 @@ export async function listMaterials(): Promise<Material[]> {
           date: r.createdAt.toISOString().split('T')[0],
           status: r.status as Material['status'],
           sizeKb: r.sizeKb,
+          fileUrl: r.fileUrl || undefined,
+          classId: r.classId || undefined,
+          lessonPlanId: r.lessonPlanId || undefined,
         }))
       }
     } catch (e) {
@@ -37,6 +57,10 @@ export async function createMaterial(params: {
   type: Material['type']
   fileBuffer?: ArrayBuffer | Buffer
   mimeType?: string
+  fileUrl?: string
+  teacherId?: string
+  classId?: string
+  lessonPlanId?: string
 }): Promise<Material> {
   const prisma = getPrisma()
   let extractedText = ''
@@ -64,7 +88,11 @@ export async function createMaterial(params: {
           type: params.type as any,
           status: 'Processed',
           sizeKb,
+          fileUrl: params.fileUrl || null,
           rawText: extractedText || undefined,
+          teacherId: params.teacherId || null,
+          classId: params.classId || null,
+          lessonPlanId: params.lessonPlanId || null,
         },
       })
       return {
@@ -76,6 +104,10 @@ export async function createMaterial(params: {
         date: created.createdAt.toISOString().split('T')[0],
         status: created.status as Material['status'],
         sizeKb: created.sizeKb,
+        fileUrl: created.fileUrl || undefined,
+        rawText: created.rawText || extractedText || undefined,
+        classId: created.classId || undefined,
+        lessonPlanId: created.lessonPlanId || undefined,
       }
     } catch (e) {
       console.warn('Prisma material creation failed, falling back to mock:', e)
@@ -92,6 +124,10 @@ export async function createMaterial(params: {
     date: new Date().toISOString().split('T')[0],
     status: 'Processed',
     sizeKb,
+    fileUrl: params.fileUrl,
+    rawText: extractedText || undefined,
+    classId: params.classId,
+    lessonPlanId: params.lessonPlanId,
   }
 
   return newMaterial
@@ -100,22 +136,78 @@ export async function createMaterial(params: {
 export async function analyzeMaterialService(
   materialNameOrTopic: string,
   topic: string,
+  metadata?: {
+    subject?: string
+    grade?: string
+    curriculum?: string
+    content?: string
+    materialId?: string
+  },
 ): Promise<MaterialAnalysis> {
-  const analysis = await aiAnalyzeMaterial(materialNameOrTopic, topic)
-
   const prisma = getPrisma()
+  let rawText = metadata?.content
+  let subject = metadata?.subject
+  let targetMaterialId = metadata?.materialId
+
+  // Attempt to enrich with stored DB material info if available
+  if (prisma && (!rawText || !subject)) {
+    try {
+      const existingMat = await prisma.material.findFirst({
+        where: targetMaterialId ? { id: targetMaterialId } : { topic },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (existingMat) {
+        if (!rawText && existingMat.rawText) rawText = existingMat.rawText
+        if (!subject && existingMat.subject) subject = existingMat.subject
+        if (!targetMaterialId) targetMaterialId = existingMat.id
+      }
+    } catch (e) {
+      console.warn('Could not fetch material record from database:', e)
+    }
+  }
+
+  // Call REAL Google Gemini AI to analyze the material
+  const geminiResult = await analyzeMaterialWithGemini({
+    subject: subject || 'General Subject',
+    grade: metadata?.grade || 'Standard Secondary / Undergraduate',
+    topic: topic || materialNameOrTopic,
+    curriculum: metadata?.curriculum || 'Standard National Curriculum',
+    materialName: materialNameOrTopic,
+    content: rawText,
+  })
+
+  const analysis: MaterialAnalysis = {
+    materialId: targetMaterialId,
+    topic: topic || geminiResult.title || materialNameOrTopic,
+    subject: subject || 'General Subject',
+    title: geminiResult.title,
+    summary: geminiResult.summary,
+    detectedConcepts: geminiResult.coreConcepts,
+    coreConcepts: geminiResult.coreConcepts,
+    subConcepts: geminiResult.subConcepts,
+    difficulty: 'Standard',
+    prerequisites: geminiResult.prerequisites,
+    commonMisconceptions: geminiResult.commonMisconceptions,
+    learningOutcomes: geminiResult.learningOutcomes,
+    importantTopics: geminiResult.importantTopics,
+    suggestedLessonTopics: geminiResult.suggestedLessonTopics,
+    approvalStatus: 'Draft',
+    analyzedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  }
+
   if (prisma) {
     try {
       await prisma.materialAnalysis.create({
         data: {
+          materialId: targetMaterialId || undefined,
           topic: analysis.topic,
           subject: analysis.subject,
           detectedConcepts: analysis.detectedConcepts,
-          difficulty: analysis.difficulty as any,
+          difficulty: 'Standard',
           prerequisites: analysis.prerequisites,
           commonMisconceptions: analysis.commonMisconceptions,
           learningOutcomes: analysis.learningOutcomes,
-          approvalStatus: analysis.approvalStatus as any,
+          approvalStatus: 'Draft',
         },
       })
     } catch (e) {

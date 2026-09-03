@@ -77,8 +77,16 @@ interface SessionState {
 interface SessionContextValue extends SessionState {
   setSelectedTopic: (topic: string) => void
   uploadMaterial: (file: { name: string; subject: string; topic: string; type: Material['type'] }) => Promise<Material>
-  analyzeTopic: (topic: string, materialName?: string) => Promise<MaterialAnalysis>
-  getAdaptiveTracksForTopic: (topic: string) => Promise<AdaptiveTrack[]>
+  analyzeTopic: (
+    topic: string,
+    materialName?: string,
+    metadata?: { subject?: string; content?: string; materialId?: string },
+  ) => Promise<MaterialAnalysis>
+  getAdaptiveTracksForTopic: (
+    topic: string,
+    options?: { subject?: string; grade?: string; curriculum?: string; studentId?: string },
+    forceRefresh?: boolean,
+  ) => Promise<AdaptiveTrack[]>
   updateTrackContent: (topic: string, level: LearningLevel, track: AdaptiveTrack) => void
   approveAndAssignTopic: (topic: string) => void
   getQuizForTopic: (topic: string, count?: number) => Promise<QuizQuestion[]>
@@ -297,24 +305,30 @@ export function SessionProvider({
     return newMaterial
   }
 
-  const analyzeTopic = async (topic: string, materialName = '') => {
+  const analyzeTopic = async (
+    topic: string,
+    materialName = '',
+    metadata?: { subject?: string; content?: string; materialId?: string },
+  ) => {
     let analysis: MaterialAnalysis
 
-    try {
-      const res = await fetch('/api/materials/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, materialName }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        analysis = data.analysis
-      } else {
-        analysis = await aiAnalyzeMaterial(materialName || topic, topic)
-      }
-    } catch (_) {
-      analysis = await aiAnalyzeMaterial(materialName || topic, topic)
+    const res = await fetch('/api/materials/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic,
+        materialName,
+        subject: metadata?.subject,
+        content: metadata?.content,
+        materialId: metadata?.materialId,
+      }),
+    })
+
+    const data = await res.json()
+    if (!res.ok || !data.success || !data.analysis) {
+      throw new Error(data.error || 'Failed to analyze material using Gemini AI.')
     }
+    analysis = data.analysis
 
     setState((prev) => ({
       ...prev,
@@ -340,27 +354,33 @@ export function SessionProvider({
     return analysis
   }
 
-  const getAdaptiveTracksForTopic = async (topic: string) => {
-    if (state.adaptiveTracks[topic]) {
+  const getAdaptiveTracksForTopic = async (
+    topic: string,
+    options?: { subject?: string; grade?: string; curriculum?: string; studentId?: string },
+    forceRefresh = false,
+  ) => {
+    if (!forceRefresh && state.adaptiveTracks[topic]) {
       return state.adaptiveTracks[topic]
     }
 
-    let tracks: AdaptiveTrack[]
-    try {
-      const res = await fetch('/api/adaptive/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        tracks = data.tracks
-      } else {
-        tracks = await aiGenerateTracks(topic)
-      }
-    } catch (_) {
-      tracks = await aiGenerateTracks(topic)
+    const res = await fetch('/api/adaptive/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic,
+        subject: options?.subject,
+        grade: options?.grade,
+        curriculum: options?.curriculum,
+        studentId: options?.studentId || (state.studentUser ? state.studentUser.id : undefined),
+      }),
+    })
+
+    const data = await res.json()
+    if (!res.ok || !data.success || !data.tracks) {
+      throw new Error(data.error || 'Failed to generate adaptive tracks using Gemini AI.')
     }
+
+    const tracks: AdaptiveTrack[] = data.tracks
 
     setState((prev) => ({
       ...prev,
@@ -498,11 +518,31 @@ export function SessionProvider({
         newRecommendations = data.recommendations
       } else {
         submission = await aiEvaluateQuiz(topic, answers, questions)
-        newRecommendations = aiGenerateRecommendations(topic, submission.identifiedGaps)
+        try {
+          const recRes = await fetch('/api/recommendations/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ topic, weakConcepts: submission.identifiedGaps, studentId: 's1' }),
+          })
+          if (recRes.ok) {
+            const recData = await recRes.json()
+            newRecommendations = recData.recommendations || []
+          }
+        } catch {}
       }
     } catch (_) {
       submission = await aiEvaluateQuiz(topic, answers, questions)
-      newRecommendations = aiGenerateRecommendations(topic, submission.identifiedGaps)
+      try {
+        const recRes = await fetch('/api/recommendations/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topic, weakConcepts: submission.identifiedGaps, studentId: 's1' }),
+        })
+        if (recRes.ok) {
+          const recData = await recRes.json()
+          newRecommendations = recData.recommendations || []
+        }
+      } catch {}
     }
 
     setState((prev) => {

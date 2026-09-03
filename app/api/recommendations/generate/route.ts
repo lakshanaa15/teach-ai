@@ -22,15 +22,52 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const topic = body.topic || 'ER Model'
-    const weakConcepts = body.weakConcepts || []
+    const topic = body.topic?.trim() || ''
 
-    const recommendations = await generateRecommendationsService(topic, weakConcepts)
+    if (!topic) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Topic is required to generate diagnostic recommendations.',
+        },
+        { status: 400 },
+      )
+    }
 
-    return NextResponse.json({ success: true, recommendations })
+    const studentId = body.studentId?.trim() || undefined
+    const classId = body.classId?.trim() || undefined
+    const weakConcepts = Array.isArray(body.weakConcepts) ? body.weakConcepts : undefined
+    const subject = body.subject?.trim() || undefined
+    const grade = body.grade?.trim() || undefined
+    const learningObjective = body.learningObjective?.trim() || undefined
+    const curriculum = body.curriculum?.trim() || undefined
+
+    const result = await generateRecommendationsService({
+      topic,
+      studentId,
+      classId,
+      weakConcepts,
+      subject,
+      grade,
+      learningObjective,
+      curriculum,
+    })
+
+    return NextResponse.json({
+      success: true,
+      diagnosticReport: result.diagnosticReport,
+      recommendations: result.recommendations,
+    })
   } catch (error) {
+    console.error('[DIAGNOSTIC-RECOMMENDATIONS-GENERATE-ERROR]:', error)
     return NextResponse.json(
-      { success: false, error: 'Failed to generate recommendations' },
+      {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Failed to generate diagnostic recommendations using Gemini AI.',
+      },
       { status: 500 },
     )
   }

@@ -151,6 +151,10 @@ model Class {
   institutionId String
   institution   Institution  @relation(fields: [institutionId], references: [id], onDelete: Cascade)
   subject       String?
+  subjectCode   String?
+  academicYear  String?      @default("III Year")
+  department    String?      @default("CSE")
+  section       String?      @default("A")
   description   String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
@@ -158,10 +162,25 @@ model Class {
   enrollments   Enrollment[]
   lessonPlans   LessonPlan[]
   quizzes       Quiz[]
+  topics        ClassTopic[]
+  materials     Material[]
 
   @@index([classCode])
   @@index([teacherId])
   @@index([institutionId])
+}
+
+model ClassTopic {
+  id        String   @id @default(cuid())
+  classId   String
+  class     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  title     String
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@index([classId])
 }
 
 model Enrollment {
@@ -193,12 +212,19 @@ model Material {
   teacherId String?
   teacher   Teacher? @relation(fields: [teacherId], references: [id], onDelete: SetNull)
 
+  classId   String?
+  class     Class?   @relation(fields: [classId], references: [id], onDelete: SetNull)
+
+  lessonPlanId String?
+  lessonPlan   LessonPlan? @relation(fields: [lessonPlanId], references: [id], onDelete: SetNull)
+
   analyses       MaterialAnalysis[]
   adaptiveTracks AdaptiveTrack[]
   quizzes        Quiz[]
 
   @@index([topic])
   @@index([subject])
+  @@index([classId])
 }
 
 model MaterialAnalysis {
@@ -276,6 +302,8 @@ model LessonPlan {
 
   classId   String?
   class     Class?   @relation(fields: [classId], references: [id], onDelete: SetNull)
+
+  materials Material[]
 
   @@index([teacherId])
   @@index([classId])

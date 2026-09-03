@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from '@/lib/auth/session'
 import { getPrisma } from '@/lib/db/prisma'
+import { analyzeQuizPerformanceWithGemini } from '@/lib/gemini'
 
 export async function POST(
   req: NextRequest,
@@ -20,6 +21,7 @@ export async function POST(
 
     const student = await prisma.student.findFirst({
       where: { userId: session.userId },
+      include: { user: true },
     })
 
     if (!student) {
@@ -127,6 +129,62 @@ export async function POST(
       },
     })
 
+    // Query Material Analysis knowledge graph if available
+    let materialAnalysisContext: any = undefined
+    try {
+      const ma = await prisma.materialAnalysis.findFirst({
+        where: { topic: { contains: quiz.topic, mode: 'insensitive' } },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (ma) {
+        materialAnalysisContext = {
+          coreConcepts: ma.detectedConcepts || [],
+          prerequisites: ma.prerequisites || [],
+          commonMisconceptions: ma.commonMisconceptions || [],
+          learningOutcomes: ma.learningOutcomes || [],
+        }
+      }
+    } catch (maErr) {
+      console.warn('[SUBMIT QUIZ] Material Analysis lookup warning:', maErr)
+    }
+
+    // Call Gemini for Real AI Learning-Gap Analysis in safe try/catch (deterministic score is preserved)
+    let learningAnalysis: any = null
+    let aiStatus: 'completed' | 'unavailable' = 'completed'
+    let aiMessage: string | undefined = undefined
+
+    try {
+      learningAnalysis = await analyzeQuizPerformanceWithGemini({
+        quizTitle: quiz.title,
+        subject: quiz.subject || undefined,
+        grade: quiz.grade || undefined,
+        topic: quiz.topic,
+        learningObjective: quiz.learningObjective || undefined,
+        curriculum: quiz.curriculum || undefined,
+        student: { id: student.id, name: student.user?.name || session.email || 'Student' },
+        score,
+        total: totalMarks,
+        percentage,
+        questionResults: quiz.questions.map((q, idx) => {
+          const cr = conceptResults[idx]
+          return {
+            question: q.question,
+            concept: q.concept || quiz.topic,
+            difficulty: q.difficulty || undefined,
+            correctAnswer: q.answer,
+            studentAnswer: cr?.userAnswer || '',
+            correct: cr?.correct || false,
+            explanation: q.explanation,
+          }
+        }),
+        materialAnalysisContext,
+      })
+    } catch (geminiErr) {
+      console.error('[SUBMIT QUIZ] Gemini learning analysis warning:', geminiErr)
+      aiStatus = 'unavailable'
+      aiMessage = 'Quiz submitted successfully. AI learning analysis is temporarily unavailable.'
+    }
+
     return NextResponse.json({
       success: true,
       submission: {
@@ -136,7 +194,11 @@ export async function POST(
         percentage,
         identifiedGaps,
         conceptResults,
+        learningAnalysis,
       },
+      learningAnalysis,
+      aiStatus,
+      aiMessage,
     })
   } catch (error) {
     console.error('[SUBMIT QUIZ ERROR]:', error)

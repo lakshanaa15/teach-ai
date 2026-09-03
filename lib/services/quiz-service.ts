@@ -2,8 +2,9 @@ import { getPrisma } from '@/lib/db/prisma'
 import {
   evaluateQuizSubmission as aiEvaluateQuiz,
   generateQuiz as aiGenerateQuiz,
-  generateRecommendations as aiGenerateRecommendations,
 } from '@/lib/ai-service'
+import { analyzeQuizPerformanceWithGemini } from '@/lib/gemini'
+import { generateRecommendationsService } from './recommendation-service'
 import type { QuizQuestion, QuizSubmission, Recommendation } from '@/lib/types'
 
 export async function generateQuizService(
@@ -48,7 +49,40 @@ export async function evaluateQuizSubmissionService(
   studentId = 's1',
 ): Promise<{ submission: QuizSubmission; recommendations: Recommendation[] }> {
   const submission = await aiEvaluateQuiz(topic, answers, questions)
-  const recommendations = aiGenerateRecommendations(topic, submission.identifiedGaps)
+
+  // Real Gemini Learning-Gap Analysis (supplementary, non-blocking)
+  try {
+    const learningAnalysis = await analyzeQuizPerformanceWithGemini({
+      quizTitle: `${topic} Check Assessment`,
+      topic,
+      score: submission.score,
+      total: submission.total,
+      percentage: submission.percentage,
+      questionResults: questions.map((q, idx) => ({
+        question: q.question,
+        concept: q.concept || topic,
+        correctAnswer: q.answer,
+        studentAnswer: answers[idx] || '',
+        correct: submission.conceptResults[idx]?.correct || false,
+        explanation: q.explanation,
+      })),
+    })
+    submission.learningAnalysis = learningAnalysis
+  } catch (err) {
+    console.warn('[EVALUATE-QUIZ] Gemini learning analysis warning:', err)
+  }
+
+  let recommendations: Recommendation[] = []
+  try {
+    const recResult = await generateRecommendationsService({
+      topic,
+      studentId,
+      weakConcepts: submission.identifiedGaps,
+    })
+    recommendations = recResult.recommendations
+  } catch (err) {
+    console.warn('[EVALUATE-QUIZ] Real recommendation generation warning:', err)
+  }
 
   const prisma = getPrisma()
   if (prisma) {

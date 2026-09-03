@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { authStore } from '@/lib/db/auth-store'
 import { verifyPassword } from '@/lib/auth/password'
 import { createSessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session'
+import { getPrisma } from '@/lib/db/prisma'
 
 export async function POST(req: NextRequest) {
   try {
@@ -51,10 +52,35 @@ export async function POST(req: NextRequest) {
     let studentId: string | undefined
     let className: string | undefined
 
+    const prisma = getPrisma()
+    let institutionName = 'M. Kumarasamy College of Engineering'
+    let institutionCode = 'MKCE2026'
+
+    if (prisma) {
+      const inst = await prisma.institution.findUnique({
+        where: { id: user.institutionId },
+      })
+      if (inst) {
+        institutionName = inst.name
+        institutionCode = inst.code
+      }
+    }
+
     if (user.role === 'TEACHER') {
       const teacher = await authStore.findTeacherByUserId(user.id)
       teacherId = teacher?.id
-      className = teacher?.className || 'Grade 10 · Advanced Track'
+      if (prisma && teacherId) {
+        const latestClass = await prisma.class.findFirst({
+          where: { teacherId },
+          orderBy: { createdAt: 'desc' },
+        })
+        if (latestClass) {
+          className = latestClass.name
+        }
+      }
+      if (!className && teacher?.className) {
+        className = teacher.className
+      }
     } else {
       const student = await authStore.findStudentByUserId(user.id)
       studentId = student?.id
@@ -67,8 +93,8 @@ export async function POST(req: NextRequest) {
       name: user.name,
       role: user.role,
       institutionId: user.institutionId,
-      institutionName: 'M. Kumarasamy College of Engineering',
-      institutionCode: 'MKCE2026',
+      institutionName,
+      institutionCode,
       teacherId,
       studentId,
       className,
@@ -84,7 +110,8 @@ export async function POST(req: NextRequest) {
         name: user.name,
         email: user.email,
         role: user.role,
-        institutionName: 'M. Kumarasamy College of Engineering',
+        institutionName,
+        institutionCode,
         teacherId,
         studentId,
         className,

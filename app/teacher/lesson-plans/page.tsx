@@ -12,8 +12,10 @@ import {
   Copy,
   Download,
   Edit3,
+  Eye,
   FileCheck2,
   FileDown,
+  FileText,
   FolderOpen,
   History,
   Layers,
@@ -24,9 +26,12 @@ import {
   RefreshCw,
   Save,
   Send,
+  ShieldCheck,
   Sparkles,
   Target,
   Trash2,
+  TrendingUp,
+  Upload,
   Wand2,
   X,
   XCircle,
@@ -40,6 +45,8 @@ import { AILoading } from '@/components/shared/states'
 import { useToast } from '@/components/shared/toast'
 import { exportLessonPlanPDF, exportQuizPDF } from '@/lib/export-pdf'
 import type { GeneratedLessonPlanContent } from '@/lib/gemini'
+import type { LessonPlanQualityAnalysis } from '@/lib/types'
+import { cn } from '@/lib/utils'
 
 interface SavedQuestion {
   id: string
@@ -86,10 +93,22 @@ interface SavedLessonPlan {
   class?: { id: string; name: string; classCode: string } | null
 }
 
+interface ClassTopic {
+  id: string
+  title: string
+  order: number
+  isActive: boolean
+}
+
 interface TeacherClass {
   id: string
   name: string
   classCode: string
+  subject?: string
+  academicYear?: string
+  department?: string
+  section?: string
+  topics?: ClassTopic[]
 }
 
 export default function LessonPlansPage() {
@@ -97,21 +116,26 @@ export default function LessonPlansPage() {
 
   // 9 Teacher Inputs
   const [subject, setSubject] = React.useState('Database Management Systems')
-  const [grade, setGrade] = React.useState('Grade 10')
-  const [topic, setTopic] = React.useState('ER Model — Entity, Attribute, Cardinality')
+  const [grade, setGrade] = React.useState('III Year')
+  const [topic, setTopic] = React.useState('Normalization')
   const [learningObjective, setLearningObjective] = React.useState(
-    'Identify entity sets, map 1:1, 1:N, and M:N relationships, and construct relational junction tables.',
+    'Understand 1NF, 2NF, 3NF, and BCNF functional dependencies and construct normalized relational schemas.',
   )
   const [duration, setDuration] = React.useState('45 mins')
   const [noOfQuestions, setNoOfQuestions] = React.useState(4)
   const [optionalSource, setOptionalSource] = React.useState('')
-  const [curriculum, setCurriculum] = React.useState('CBSE / Computer Science')
+  const [curriculum, setCurriculum] = React.useState('Autonomous / Computer Science')
   const [selectedClassId, setSelectedClassId] = React.useState('')
 
   // State
   const [classes, setClasses] = React.useState<TeacherClass[]>([])
   const [isLoading, setIsLoading] = React.useState(false)
   const [isSaving, setIsSaving] = React.useState(false)
+
+  // Add Topic Inline State
+  const [showAddTopicInline, setShowAddTopicInline] = React.useState(false)
+  const [newTopicInline, setNewTopicInline] = React.useState('')
+  const [isAddingTopicInline, setIsAddingTopicInline] = React.useState(false)
 
   // Active generated/loaded pair
   const [activePlan, setActivePlan] = React.useState<SavedLessonPlan | null>(null)
@@ -121,14 +145,80 @@ export default function LessonPlansPage() {
   const [isEditingPlan, setIsEditingPlan] = React.useState(false)
   const [editedPlanContent, setEditedPlanContent] = React.useState<GeneratedLessonPlanContent | null>(null)
   const [editedPlanTitle, setEditedPlanTitle] = React.useState('')
+  const [editedPlanTopic, setEditedPlanTopic] = React.useState('')
+  const [editedPlanObjective, setEditedPlanObjective] = React.useState('')
+
+  // Attached PDF Learning Materials State
+  const [attachedMaterials, setAttachedMaterials] = React.useState<any[]>([])
+  const [isUploadingPdf, setIsUploadingPdf] = React.useState(false)
+  const [pdfUploadProgress, setPdfUploadProgress] = React.useState(0)
+  const pdfInputRef = React.useRef<HTMLInputElement | null>(null)
 
   // Quiz inline edit state
   const [editingQuestionId, setEditingQuestionId] = React.useState<string | null>(null)
   const [editQuestionData, setEditQuestionData] = React.useState<SavedQuestion | null>(null)
   const [editedQuizTitle, setEditedQuizTitle] = React.useState('')
 
+  // Quality analysis state
+  const [qualityAnalysis, setQualityAnalysis] = React.useState<LessonPlanQualityAnalysis | null>(null)
+  const [isAnalyzingQuality, setIsAnalyzingQuality] = React.useState(false)
+  const [planModifiedSinceAnalysis, setPlanModifiedSinceAnalysis] = React.useState(false)
+
   // Saved History from PostgreSQL
   const [savedPlansList, setSavedPlansList] = React.useState<SavedLessonPlan[]>([])
+
+  const handleAnalyzeQuality = async () => {
+    if (!activePlan && !editedPlanContent) {
+      toast({
+        title: 'No Lesson Plan Available',
+        description: 'Please generate or load a lesson plan first before analyzing its quality.',
+      })
+      return
+    }
+
+    setIsAnalyzingQuality(true)
+    try {
+      const contentToAnalyze = editedPlanContent || activePlan?.content
+      const res = await fetch('/api/lesson-plans/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lessonPlanId: activePlan?.id,
+          content: contentToAnalyze,
+          topic: activePlan?.topic || topic,
+          subject: activePlan?.subject || subject,
+          grade: activePlan?.grade || grade,
+          learningObjective: activePlan?.learningObjective || learningObjective,
+          duration: activePlan?.duration || duration,
+          curriculum: activePlan?.curriculum || curriculum,
+          quizQuestions: activeQuiz?.questions,
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        toast({
+          title: 'Quality Analysis Failed',
+          description: data.error || 'Gemini API failed to evaluate lesson plan quality.',
+        })
+        return
+      }
+
+      setQualityAnalysis(data.analysis)
+      setPlanModifiedSinceAnalysis(false)
+      toast({
+        title: 'Pedagogical Analysis Complete ✨',
+        description: `Gemini evaluated 8 dimensions: Overall Quality Score ${data.analysis.overallScore}/100 (${data.analysis.rating}).`,
+      })
+    } catch (err) {
+      toast({
+        title: 'Analysis Error',
+        description: err instanceof Error ? err.message : 'Could not analyze lesson plan quality.',
+      })
+    } finally {
+      setIsAnalyzingQuality(false)
+    }
+  }
 
   // Load teacher classes and recent lesson plans on mount
   React.useEffect(() => {
@@ -140,19 +230,128 @@ export default function LessonPlansPage() {
     try {
       const res = await fetch('/api/classes')
       const data = await res.json()
-      if (res.ok && data.classes) {
+      if (res.ok && data.classes && data.classes.length > 0) {
         setClasses(data.classes)
-        const dlClass = data.classes.find((c: TeacherClass) =>
-          c.name.toLowerCase().includes('deep learning') || c.classCode.toUpperCase().includes('DEEP'),
-        )
-        if (dlClass) {
-          setSelectedClassId(dlClass.id)
-        } else if (data.classes.length > 0) {
-          setSelectedClassId(data.classes[0].id)
+
+        // Check if classId in query string
+        const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+        const classIdFromUrl = urlParams?.get('classId')
+        const targetClass = classIdFromUrl
+          ? data.classes.find((c: TeacherClass) => c.id === classIdFromUrl) || data.classes[0]
+          : data.classes[0]
+
+        if (targetClass) {
+          setSelectedClassId(targetClass.id)
+          if (targetClass.subject) setSubject(targetClass.subject)
+          if (targetClass.academicYear) setGrade(targetClass.academicYear)
+          if (targetClass.topics && targetClass.topics.length > 0) {
+            setTopic(targetClass.topics[0].title)
+          }
         }
       }
     } catch {
       // ignore
+    }
+  }
+
+  const handleSelectClass = (classId: string) => {
+    setSelectedClassId(classId)
+    const cls = classes.find((c) => c.id === classId)
+    if (cls) {
+      if (cls.subject) setSubject(cls.subject)
+      if (cls.academicYear) setGrade(cls.academicYear)
+      if (cls.topics && cls.topics.length > 0) {
+        setTopic(cls.topics[0].title)
+      }
+    }
+  }
+
+  const handleAddNewTopicInline = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedClassId || !newTopicInline.trim()) return
+    setIsAddingTopicInline(true)
+    try {
+      const res = await fetch(`/api/classes/${selectedClassId}/topics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTopicInline.trim() }),
+      })
+      const data = await res.json()
+      if (res.ok && data.success && data.topic) {
+        setClasses((prev) =>
+          prev.map((c) =>
+            c.id === selectedClassId
+              ? { ...c, topics: [...(c.topics || []), data.topic] }
+              : c,
+          ),
+        )
+        setTopic(data.topic.title)
+        setNewTopicInline('')
+        setShowAddTopicInline(false)
+        toast({
+          title: 'Topic Added to Class Syllabus! 📚',
+          description: `"${data.topic.title}" is now selected for this lesson plan.`,
+        })
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Could not add topic to class syllabus.' })
+    } finally {
+      setIsAddingTopicInline(false)
+    }
+  }
+
+  const handleUploadPdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+      toast({ title: 'Invalid File Type', description: 'Please select a PDF document (.pdf).' })
+      return
+    }
+
+    if (file.size > 50 * 1024 * 1024) {
+      toast({ title: 'File Too Large', description: 'Maximum PDF file size is 50MB.' })
+      return
+    }
+
+    setIsUploadingPdf(true)
+    setPdfUploadProgress(35)
+
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('name', file.name)
+    formData.append('subject', activePlan?.subject || subject)
+    formData.append('topic', activePlan?.topic || topic)
+    if (selectedClassId) formData.append('classId', selectedClassId)
+    if (activePlan?.id) formData.append('lessonPlanId', activePlan.id)
+
+    try {
+      setPdfUploadProgress(70)
+      const res = await fetch('/api/materials', {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      setPdfUploadProgress(100)
+
+      if (res.ok && data.success && data.material) {
+        setAttachedMaterials((prev) => [data.material, ...prev])
+        toast({
+          title: 'PDF Uploaded Successfully! 📄',
+          description: `Attached "${file.name}" to this lesson plan and persisted to storage.`,
+        })
+      } else {
+        toast({
+          title: 'Upload Failed',
+          description: data.error || 'Failed to upload PDF.',
+        })
+      }
+    } catch {
+      toast({ title: 'Upload Error', description: 'Network error uploading PDF.' })
+    } finally {
+      setIsUploadingPdf(false)
+      setPdfUploadProgress(0)
+      if (pdfInputRef.current) pdfInputRef.current.value = ''
     }
   }
 
@@ -448,6 +647,50 @@ export default function LessonPlansPage() {
     })
     setEditingQuestionId(null)
     setEditQuestionData(null)
+    toast({ title: 'Question updated in memory' })
+  }
+
+  const handleAddQuizQuestion = () => {
+    if (!activeQuiz) return
+    const newQ: SavedQuestion = {
+      id: `q-custom-${Date.now()}`,
+      type: 'MCQ',
+      question: 'New concept assessment question prompt…',
+      options: ['Option A', 'Option B', 'Option C', 'Option D'],
+      answer: 'Option A',
+      explanation: 'Pedagogical explanation justifying the correct answer.',
+      concept: activeQuiz.topic,
+      difficulty: 'Standard',
+      marks: 1,
+    }
+    setActiveQuiz((prev) => {
+      if (!prev) return null
+      return {
+        ...prev,
+        questions: [...prev.questions, newQ],
+      }
+    })
+    handleStartEditQuestion(newQ)
+    toast({
+      title: 'New Question Added! ✍️',
+      description: 'Scroll down to the quiz section to customize this question.',
+    })
+  }
+
+  const handleDeleteQuizQuestion = (id: string) => {
+    if (!activeQuiz) return
+    setActiveQuiz((prev) => {
+      if (!prev) return null
+      return {
+        ...prev,
+        questions: prev.questions.filter((q) => q.id !== id),
+      }
+    })
+    if (editingQuestionId === id) {
+      setEditingQuestionId(null)
+      setEditQuestionData(null)
+    }
+    toast({ title: 'Question removed from quiz' })
   }
 
   // PDF Export Handlers
@@ -498,6 +741,20 @@ export default function LessonPlansPage() {
                 >
                   <FileDown className="size-4" />
                   Lesson Plan PDF
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAnalyzeQuality}
+                  disabled={isAnalyzingQuality || isLoading}
+                  className="gap-1.5 text-xs shadow-sm text-primary border-primary/40 hover:bg-primary/5 font-semibold"
+                >
+                  <Sparkles className={`size-4 ${isAnalyzingQuality ? 'animate-spin text-primary' : ''}`} />
+                  {isAnalyzingQuality
+                    ? 'Evaluating with Gemini...'
+                    : qualityAnalysis
+                      ? 'Re-analyze Quality with AI'
+                      : 'Analyze Quality with AI'}
                 </Button>
                 {activeQuiz && (
                   <>
@@ -555,36 +812,63 @@ export default function LessonPlansPage() {
         </CardHeader>
 
         <CardContent className="p-5 space-y-4">
+          {/* Row 1: Class, Subject, Grade, Duration */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {/* 1. Subject */}
+            {/* 1. Select Class */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Subject <span className="text-destructive">*</span>
+              <label className="text-xs font-semibold text-foreground flex items-center justify-between">
+                <span>Select Class <span className="text-primary">*</span></span>
+                <Link href="/teacher/classes" className="text-[10px] text-primary hover:underline">
+                  Manage
+                </Link>
+              </label>
+              <select
+                value={selectedClassId}
+                onChange={(e) => handleSelectClass(e.target.value)}
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
+              >
+                {classes.length === 0 ? (
+                  <option value="">No classes found (Create one first)</option>
+                ) : (
+                  classes.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.classCode})
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+
+            {/* 2. Subject (Auto-populated from Class) */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground flex items-center justify-between">
+                <span>Subject</span>
+                <span className="text-[10px] text-muted-foreground font-normal">Auto-set from class</span>
               </label>
               <input
                 type="text"
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
                 placeholder="e.g. Database Management Systems"
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
+                className="h-9 w-full rounded-lg border border-input bg-muted/40 px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-semibold text-foreground"
               />
             </div>
 
-            {/* 2. Grade / Class */}
+            {/* 3. Academic Year / Grade */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-foreground">
-                Grade / Class <span className="text-destructive">*</span>
+                Year / Grade <span className="text-destructive">*</span>
               </label>
               <input
                 type="text"
                 value={grade}
                 onChange={(e) => setGrade(e.target.value)}
-                placeholder="e.g. Grade 10"
+                placeholder="e.g. III Year"
                 className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
               />
             </div>
 
-            {/* 3. Duration */}
+            {/* 4. Duration */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-foreground">
                 Duration <span className="text-destructive">*</span>
@@ -597,41 +881,80 @@ export default function LessonPlansPage() {
                 className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
               />
             </div>
-
-            {/* 4. Curriculum / Board */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Curriculum / Board <span className="text-destructive">*</span>
-              </label>
-              <input
-                type="text"
-                value={curriculum}
-                onChange={(e) => setCurriculum(e.target.value)}
-                placeholder="e.g. CBSE / Computer Science"
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
-              />
-            </div>
           </div>
 
+          {/* Row 2: Topic Selection with + Add New Topic, Curriculum, Question Count */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {/* 5. Topic */}
+            {/* 5. Topic (from Syllabus) */}
             <div className="space-y-1.5 lg:col-span-2">
-              <label className="text-xs font-semibold text-foreground">
-                Topic <span className="text-destructive">*</span>
-              </label>
-              <input
-                type="text"
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                placeholder="e.g. ER Model — Entity, Attribute, Cardinality"
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
-              />
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-foreground">
+                  Select Topic (from Syllabus) <span className="text-destructive">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowAddTopicInline(!showAddTopicInline)}
+                  className="text-[11px] font-semibold text-primary hover:underline flex items-center gap-1"
+                >
+                  <Plus className="size-3" />
+                  {showAddTopicInline ? 'Select Existing Topic' : '+ Add New Topic'}
+                </button>
+              </div>
+
+              {showAddTopicInline ? (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    placeholder="Enter new topic title (e.g. Normalization)..."
+                    value={newTopicInline}
+                    onChange={(e) => setNewTopicInline(e.target.value)}
+                    className="h-9 flex-1 rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={isAddingTopicInline || !newTopicInline.trim()}
+                    onClick={handleAddNewTopicInline}
+                    className="gap-1 text-xs shrink-0"
+                  >
+                    <Plus className="size-3.5" />
+                    Add to Syllabus
+                  </Button>
+                </div>
+              ) : (
+                (() => {
+                  const currClass = classes.find((c) => c.id === selectedClassId) || classes[0]
+                  const classTopics = currClass?.topics || []
+                  return classTopics.length > 0 ? (
+                    <select
+                      value={topic}
+                      onChange={(e) => setTopic(e.target.value)}
+                      className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-semibold"
+                    >
+                      {classTopics.map((t) => (
+                        <option key={t.id || t.title} value={t.title}>
+                          {t.title}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={topic}
+                      onChange={(e) => setTopic(e.target.value)}
+                      placeholder="e.g. Normalization (1NF, 2NF, 3NF, BCNF)"
+                      className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
+                    />
+                  )
+                })()
+              )}
             </div>
 
             {/* 6. No. of Questions */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-foreground">
-                No. of Questions <span className="text-destructive">*</span>
+                Quiz Questions <span className="text-destructive">*</span>
               </label>
               <input
                 type="number"
@@ -644,7 +967,7 @@ export default function LessonPlansPage() {
             </div>
           </div>
 
-          {/* 7. Learning Objective */}
+          {/* Row 3: Learning Objective */}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-foreground">
               Learning Objective <span className="text-destructive">*</span>
@@ -653,13 +976,24 @@ export default function LessonPlansPage() {
               rows={2}
               value={learningObjective}
               onChange={(e) => setLearningObjective(e.target.value)}
-              placeholder="e.g. Identify entity sets, map 1:1, 1:N, and M:N relationships, and construct relational junction tables."
+              placeholder="e.g. Understand 1NF, 2NF, 3NF, and BCNF functional dependencies and construct normalized relational schemas."
               className="w-full resize-none rounded-lg border border-input bg-background p-2.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-2"
             />
           </div>
 
-          {/* 8. Optional Source & 9. Assign To Class */}
+          {/* Row 4: Curriculum & Optional Source */}
           <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">Curriculum / Board</label>
+              <input
+                type="text"
+                value={curriculum}
+                onChange={(e) => setCurriculum(e.target.value)}
+                placeholder="e.g. Autonomous / Computer Science"
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
+              />
+            </div>
+
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-muted-foreground">
                 Optional Source / Context Notes
@@ -671,23 +1005,6 @@ export default function LessonPlansPage() {
                 placeholder="e.g. Lecture slide excerpts, Chapter 3 notes..."
                 className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2"
               />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Assign To Class <span className="text-primary">*</span>
-              </label>
-              <select
-                value={selectedClassId}
-                onChange={(e) => setSelectedClassId(e.target.value)}
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
-              >
-                {classes.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.classCode})
-                  </option>
-                ))}
-              </select>
             </div>
           </div>
 
@@ -760,7 +1077,59 @@ export default function LessonPlansPage() {
 
       {/* Display Generated/Loaded Lesson Plan & Quiz */}
       {!isLoading && activePlan && activePlan.content && (
-        <div className="space-y-8 animate-in fade-in-50">
+        <div className="space-y-6 animate-in fade-in-50">
+          {/* VISUAL WORKFLOW PIPELINE: DRAFT ➔ EDIT ➔ REVIEW ➔ APPROVED ➔ PUBLISHED */}
+          <Card className="border-border bg-card p-4 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/60 pb-3 mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Publishing Lifecycle:
+                </span>
+                <Badge
+                  variant={activePlan.status === 'Approved' ? 'success' : isEditingPlan ? 'default' : 'warning'}
+                  className="text-[10px] uppercase font-bold"
+                >
+                  {activePlan.status === 'Approved' ? '✓ APPROVED & PUBLISHED' : isEditingPlan ? '✏️ IN EDIT' : '⚡ DRAFT REVIEW'}
+                </Badge>
+              </div>
+              <p className="text-xs font-medium text-muted-foreground">
+                {activePlan.status === 'Approved'
+                  ? '✓ This lesson and quiz are published and live for enrolled students.'
+                  : '⚠️ Review the lesson plan and quiz before approving.'}
+              </p>
+            </div>
+
+            {/* Stepper Steps */}
+            <div className="grid grid-cols-5 gap-2 text-center text-xs font-semibold">
+              {[
+                { step: '1', label: 'DRAFT', done: true, desc: 'AI Generated' },
+                { step: '2', label: 'EDIT', done: isEditingPlan || activePlan.status === 'Approved', desc: 'Customized' },
+                { step: '3', label: 'REVIEW', done: activePlan.status === 'Approved', desc: 'Verification' },
+                { step: '4', label: 'APPROVED', done: activePlan.status === 'Approved', desc: 'Teacher Sign-Off' },
+                { step: '5', label: 'PUBLISHED', done: activePlan.status === 'Approved', desc: 'Live in Class' },
+              ].map((s) => (
+                <div key={s.label} className="flex flex-col items-center gap-1">
+                  <div
+                    className={cn(
+                      'flex size-7 items-center justify-center rounded-full text-xs font-bold font-mono transition-all',
+                      s.done
+                        ? 'bg-primary text-primary-foreground shadow-xs'
+                        : 'bg-muted text-muted-foreground',
+                    )}
+                  >
+                    {s.done ? '✓' : s.step}
+                  </div>
+                  <span className={cn('text-[11px]', s.done ? 'text-foreground font-bold' : 'text-muted-foreground')}>
+                    {s.label}
+                  </span>
+                  <span className="hidden md:inline text-[9px] text-muted-foreground font-normal">
+                    {s.desc}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
           {/* Top Control Bar */}
           <Card className={`border-primary/40 p-4 transition-all ${isEditingPlan ? 'bg-primary/5 border-primary shadow-sm ring-1 ring-primary/30' : 'bg-muted/20'}`}>
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -819,13 +1188,12 @@ export default function LessonPlansPage() {
                 ) : (
                   <>
                     <Button
-                      variant="outline"
                       size="sm"
                       onClick={handleStartEditPlan}
-                      className="gap-1.5 text-xs border-primary/50 text-primary hover:bg-primary/10 font-semibold"
+                      className="gap-1.5 text-xs bg-amber-500 hover:bg-amber-600 text-white font-bold shadow-sm"
                     >
-                      <Edit3 className="size-3.5" />
-                      Edit
+                      <Edit3 className="size-4" />
+                      Edit Lesson Plan
                     </Button>
                     <Button
                       variant="outline"
@@ -851,7 +1219,7 @@ export default function LessonPlansPage() {
                         size="sm"
                         onClick={handleApproveAndPublish}
                         disabled={isSaving}
-                        className="gap-1.5 text-xs shadow-sm bg-success hover:bg-success/90"
+                        className="gap-1.5 text-xs shadow-sm bg-success hover:bg-success/90 font-bold"
                       >
                         <CheckCircle2 className="size-3.5" />
                         Approve & Publish
@@ -864,18 +1232,263 @@ export default function LessonPlansPage() {
 
             {/* Editing Active Notification Banner */}
             {isEditingPlan && (
-              <div className="mt-3 flex items-center justify-between rounded-lg bg-primary/10 border border-primary/20 p-2.5 text-xs text-primary font-medium">
-                <div className="flex items-center gap-2">
-                  <Edit3 className="size-4 animate-pulse" />
-                  <span><strong>EDITING MODE ACTIVE:</strong> You can edit any section below. Click <strong>&quot;Save Changes&quot;</strong> to persist to database.</span>
+              <div className="mt-3 space-y-2.5 rounded-lg bg-primary/10 border border-primary/20 p-3 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-primary font-bold">
+                    <Edit3 className="size-4 animate-pulse" />
+                    <span>EDITING LESSON PLAN & TOPIC: Modify title, topic, objective, or content below.</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="xs" variant="outline" onClick={handleCancelEditPlan}>
+                      Cancel
+                    </Button>
+                    <Button
+                      size="xs"
+                      onClick={handleSaveChanges}
+                      disabled={isSaving}
+                      className="bg-primary text-primary-foreground font-semibold"
+                    >
+                      Save Changes
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button size="xs" variant="outline" onClick={handleCancelEditPlan}>Cancel</Button>
-                  <Button size="xs" onClick={handleSaveChanges} disabled={isSaving} className="bg-primary">Save Changes</Button>
+
+                <div className="grid gap-3 sm:grid-cols-2 pt-1 border-t border-primary/20">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-foreground">Topic:</label>
+                    <input
+                      type="text"
+                      value={editedPlanTopic}
+                      onChange={(e) => setEditedPlanTopic(e.target.value)}
+                      className="h-8 w-full rounded border border-input bg-card px-2 text-xs font-semibold"
+                    />
+                    {editedPlanTopic !== activePlan.topic && (
+                      <div className="mt-1 flex items-center justify-between rounded bg-amber-500/10 p-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+                        <span>Topic changed from &quot;{activePlan.topic}&quot;.</span>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={() => {
+                            setTopic(editedPlanTopic)
+                            handleGenerate()
+                          }}
+                          className="h-6 text-[10px] gap-1 border-amber-500/40"
+                        >
+                          <RefreshCw className="size-2.5" /> Regenerate for New Topic
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-foreground">Learning Objective:</label>
+                    <textarea
+                      rows={2}
+                      value={editedPlanObjective}
+                      onChange={(e) => setEditedPlanObjective(e.target.value)}
+                      className="w-full rounded border border-input bg-card p-1.5 text-xs resize-none"
+                    />
+                  </div>
                 </div>
               </div>
             )}
           </Card>
+
+          {/* AI PEDAGOGICAL QUALITY & DIAGNOSTIC REVIEW PANEL */}
+          {qualityAnalysis && (
+            <Card className="border-2 border-primary/30 bg-card shadow-md animate-in fade-in zoom-in-95">
+              <CardHeader className="border-b border-border pb-4 bg-muted/20">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <div className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                        <Sparkles className="size-4" />
+                      </div>
+                      <CardTitle className="text-base font-bold text-foreground">
+                        AI Pedagogical Quality & Criterion Review
+                      </CardTitle>
+                      <Badge
+                        variant={
+                          qualityAnalysis.overallScore >= 85
+                            ? 'success'
+                            : qualityAnalysis.overallScore >= 70
+                              ? 'default'
+                              : 'warning'
+                        }
+                        className="text-xs"
+                      >
+                        {qualityAnalysis.rating}
+                      </Badge>
+                      {planModifiedSinceAnalysis && (
+                        <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300 animate-pulse">
+                          Plan edited — click Re-analyze
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">{qualityAnalysis.summary}</p>
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <div className="text-xs uppercase font-semibold text-muted-foreground">Overall Quality</div>
+                      <div className="text-2xl font-black text-primary font-mono tracking-tight">
+                        {qualityAnalysis.overallScore}
+                        <span className="text-xs text-muted-foreground font-normal"> / 100</span>
+                      </div>
+                    </div>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={handleAnalyzeQuality}
+                      disabled={isAnalyzingQuality}
+                      className="gap-1 text-xs text-primary"
+                    >
+                      <RefreshCw className={`size-3 ${isAnalyzingQuality ? 'animate-spin' : ''}`} />
+                      Re-analyze
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+
+              <CardContent className="space-y-6 pt-5 text-sm">
+                {/* 1. 8-Criteria Diagnostic Grid */}
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                    Pedagogical Dimension Evaluation
+                  </h4>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {Object.entries(qualityAnalysis.criteria).map(([key, crit]) => {
+                      const labelMap: Record<string, string> = {
+                        objectiveAlignment: 'Objective Alignment',
+                        bloomsAlignment: "Bloom's Taxonomy",
+                        contentQuality: 'Content Quality',
+                        pedagogicalQuality: 'Pedagogical Quality',
+                        differentiation: 'Differentiation',
+                        assessmentQuality: 'Assessment Quality',
+                        timeFeasibility: 'Time & Feasibility',
+                        curriculumAlignment: 'Curriculum Alignment',
+                      }
+                      const label = labelMap[key] || key
+                      const isHigh = crit.score >= 80
+                      const isMed = crit.score >= 65
+                      return (
+                        <div
+                          key={key}
+                          className="flex flex-col justify-between rounded-xl border border-border bg-card p-3 shadow-2xs"
+                        >
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold text-foreground">{label}</span>
+                              <span
+                                className={`text-xs font-mono font-bold ${
+                                  isHigh ? 'text-success' : isMed ? 'text-primary' : 'text-destructive'
+                                }`}
+                              >
+                                {crit.score}%
+                              </span>
+                            </div>
+                            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                              <div
+                                className={`h-full transition-all ${
+                                  isHigh ? 'bg-success' : isMed ? 'bg-primary' : 'bg-destructive'
+                                }`}
+                                style={{ width: `${crit.score}%` }}
+                              />
+                            </div>
+                            {crit.levelsDetected && crit.levelsDetected.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {crit.levelsDetected.map((lvl, idx) => (
+                                  <Badge key={idx} variant="secondary" className="text-[9px] py-0 px-1 font-normal">
+                                    {lvl}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <p className="mt-2 text-[11px] text-muted-foreground leading-snug line-clamp-3 hover:line-clamp-none transition-all">
+                            {crit.explanation}
+                          </p>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* 2. Strengths vs Areas to Improve */}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {/* Strengths */}
+                  <div className="rounded-xl border border-success/30 bg-success/[0.02] p-4 space-y-2">
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-success uppercase tracking-wider">
+                      <CheckCircle2 className="size-4 text-success" />
+                      <span>Pedagogical Strengths</span>
+                    </div>
+                    <ul className="space-y-1.5 text-xs text-muted-foreground">
+                      {qualityAnalysis.strengths.map((str, idx) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <span className="text-success font-bold">•</span>
+                          <span>{str}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Areas to Improve / Missing Elements */}
+                  <div className="rounded-xl border border-warning/30 bg-warning/[0.02] p-4 space-y-2">
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-warning-foreground uppercase tracking-wider">
+                      <AlertCircle className="size-4 text-warning-foreground" />
+                      <span>Areas for Improvement & Missing Elements</span>
+                    </div>
+                    <ul className="space-y-1.5 text-xs text-muted-foreground">
+                      {qualityAnalysis.weaknesses.map((w, idx) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <span className="text-warning-foreground font-bold">•</span>
+                          <span>{w}</span>
+                        </li>
+                      ))}
+                      {qualityAnalysis.missingElements?.map((m, idx) => (
+                        <li key={`m-${idx}`} className="flex items-start gap-2 text-rose-600 font-medium">
+                          <span>⚠️ Missing:</span>
+                          <span>{m}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                {/* 3. Prioritized Action Plan */}
+                {qualityAnalysis.priorityActions && qualityAnalysis.priorityActions.length > 0 && (
+                  <div className="space-y-2.5 pt-2 border-t border-border">
+                    <div className="flex items-center gap-2">
+                      <Target className="size-4 text-primary" />
+                      <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        Recommended Priority Action Plan
+                      </h4>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {qualityAnalysis.priorityActions.map((pa, idx) => (
+                        <div
+                          key={idx}
+                          className="rounded-lg border border-border bg-card p-3 text-xs space-y-1 shadow-2xs"
+                        >
+                          <div className="flex items-center justify-between">
+                            <Badge
+                              variant={pa.priority === 'High' ? 'destructive' : 'secondary'}
+                              className="text-[10px] py-0 px-1.5"
+                            >
+                              {pa.priority} Priority
+                            </Badge>
+                            <span className="text-[11px] font-medium text-foreground">{pa.issue}</span>
+                          </div>
+                          <p className="text-muted-foreground text-[11px] leading-relaxed pt-1">
+                            👉 {pa.recommendation}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* SECTION 1: GENERATED LESSON PLAN */}
           <div className="space-y-6">
@@ -887,6 +1500,20 @@ export default function LessonPlansPage() {
                 </h3>
               </div>
               <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={handleAnalyzeQuality}
+                  disabled={isAnalyzingQuality}
+                  className="gap-1 text-xs text-primary border-primary/40 hover:bg-primary/5 font-semibold"
+                >
+                  <Sparkles className={`size-3.5 ${isAnalyzingQuality ? 'animate-spin text-primary' : ''}`} />
+                  {isAnalyzingQuality
+                    ? 'Evaluating...'
+                    : qualityAnalysis
+                      ? 'Re-analyze Quality'
+                      : 'Analyze Quality with AI'}
+                </Button>
                 {!isEditingPlan && (
                   <Button
                     variant="outline"
@@ -1683,6 +2310,123 @@ export default function LessonPlansPage() {
             </div>
           </div>
 
+          {/* SECTION: ATTACHED LEARNING MATERIALS (PDF) */}
+          <Card className="border-border bg-card shadow-xs">
+            <CardHeader className="border-b border-border pb-3 bg-muted/20 flex flex-row items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText className="size-4 text-primary" />
+                <CardTitle className="text-sm font-bold">
+                  Attached Learning Materials ({attachedMaterials.length})
+                </CardTitle>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="file"
+                  ref={pdfInputRef}
+                  onChange={handleUploadPdf}
+                  accept=".pdf"
+                  className="hidden"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => pdfInputRef.current?.click()}
+                  disabled={isUploadingPdf}
+                  className="gap-1.5 text-xs font-semibold"
+                >
+                  <Upload className="size-3.5" />
+                  {isUploadingPdf ? 'Uploading PDF...' : 'Upload PDF from Computer'}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4 space-y-3">
+              {isUploadingPdf && (
+                <div className="space-y-1.5 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                  <div className="flex justify-between text-xs font-semibold text-primary">
+                    <span>Uploading PDF document to storage...</span>
+                    <span>{pdfUploadProgress}%</span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-primary/20">
+                    <div
+                      className="h-full bg-primary transition-all duration-300"
+                      style={{ width: `${pdfUploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {attachedMaterials.length === 0 && !isUploadingPdf ? (
+                <div className="rounded-lg border border-dashed border-border p-6 text-center">
+                  <FileText className="mx-auto size-8 text-muted-foreground/50 mb-2" />
+                  <p className="text-xs font-semibold text-foreground">No PDF learning materials attached yet</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
+                    Upload syllabus chapters, lecture slides, or textbook excerpts (.pdf, up to 50MB) for students.
+                  </p>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => pdfInputRef.current?.click()}
+                    className="gap-1 text-xs"
+                  >
+                    <Upload className="size-3" />
+                    Select PDF File
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {attachedMaterials.map((mat) => (
+                    <div
+                      key={mat.id}
+                      className="flex items-center justify-between rounded-lg border border-border bg-background p-3 text-xs"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex size-8 items-center justify-center rounded bg-destructive/10 text-destructive font-bold text-[10px]">
+                          PDF
+                        </div>
+                        <div>
+                          <p className="font-semibold text-foreground">{mat.name}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {mat.sizeKb ? `${mat.sizeKb} KB` : 'PDF Document'} • Uploaded for {mat.topic}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {mat.fileUrl && (
+                          <>
+                            <a
+                              href={mat.fileUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-semibold text-foreground hover:bg-muted"
+                            >
+                              <Eye className="size-3 text-primary" /> View PDF
+                            </a>
+                            <a
+                              href={mat.fileUrl}
+                              download={mat.name}
+                              className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-semibold text-foreground hover:bg-muted"
+                            >
+                              <Download className="size-3 text-primary" /> Download
+                            </a>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setAttachedMaterials((prev) => prev.filter((m: any) => m.id !== mat.id))}
+                          className="rounded p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                          title="Remove from lesson plan"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* SECTION 2: GENERATED ASSOCIATED QUIZ */}
           {activeQuiz && (
             <div className="space-y-6 pt-4">
@@ -1700,6 +2444,15 @@ export default function LessonPlansPage() {
                   </Badge>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="default"
+                    size="xs"
+                    onClick={handleAddQuizQuestion}
+                    className="gap-1 text-xs font-semibold shadow-xs"
+                  >
+                    <Plus className="size-3.5" />
+                    Add Question
+                  </Button>
                   <Button
                     variant="outline"
                     size="xs"
@@ -1758,6 +2511,15 @@ export default function LessonPlansPage() {
                             <Edit3 className="size-3" />
                             {isEditingQ ? 'Done' : 'Edit Question'}
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            onClick={() => handleDeleteQuizQuestion(q.id)}
+                            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            title="Delete question"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
                         </div>
                       </CardHeader>
 
@@ -1784,24 +2546,57 @@ export default function LessonPlansPage() {
 
                             {editQuestionData.options && editQuestionData.options.length > 0 && (
                               <div className="space-y-1.5">
-                                <label className="text-xs font-semibold uppercase text-muted-foreground">
-                                  Options
-                                </label>
-                                {editQuestionData.options.map((opt, optIdx) => (
-                                  <input
-                                    key={optIdx}
-                                    type="text"
-                                    value={opt}
-                                    onChange={(e) => {
-                                      const nextOpts = [...editQuestionData.options]
-                                      nextOpts[optIdx] = e.target.value
-                                      setEditQuestionData({
-                                        ...editQuestionData,
-                                        options: nextOpts,
-                                      })
+                                <div className="flex items-center justify-between">
+                                  <label className="text-xs font-semibold uppercase text-muted-foreground">
+                                    Options
+                                  </label>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="xs"
+                                    onClick={() => {
+                                      const nextOpts = [...(editQuestionData.options || [])]
+                                      nextOpts.push(`Option ${String.fromCharCode(65 + nextOpts.length)}`)
+                                      setEditQuestionData({ ...editQuestionData, options: nextOpts })
                                     }}
-                                    className="h-8 w-full rounded-lg border border-input bg-card px-2.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-2"
-                                  />
+                                    className="h-6 text-[10px] text-primary hover:underline gap-1"
+                                  >
+                                    <Plus className="size-3" /> Add Option
+                                  </Button>
+                                </div>
+                                {editQuestionData.options.map((opt, optIdx) => (
+                                  <div key={optIdx} className="flex items-center gap-2">
+                                    <span className="font-mono text-xs font-bold text-muted-foreground w-4">
+                                      {String.fromCharCode(65 + optIdx)}.
+                                    </span>
+                                    <input
+                                      type="text"
+                                      value={opt}
+                                      onChange={(e) => {
+                                        const nextOpts = [...editQuestionData.options]
+                                        nextOpts[optIdx] = e.target.value
+                                        setEditQuestionData({
+                                          ...editQuestionData,
+                                          options: nextOpts,
+                                        })
+                                      }}
+                                      className="h-8 flex-1 rounded-lg border border-input bg-card px-2.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-2"
+                                    />
+                                    {editQuestionData.options.length > 2 && (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon-xs"
+                                        onClick={() => {
+                                          const nextOpts = editQuestionData.options.filter((_, i) => i !== optIdx)
+                                          setEditQuestionData({ ...editQuestionData, options: nextOpts })
+                                        }}
+                                        className="text-muted-foreground hover:text-destructive"
+                                      >
+                                        <X className="size-3" />
+                                      </Button>
+                                    )}
+                                  </div>
                                 ))}
                               </div>
                             )}
@@ -1811,17 +2606,36 @@ export default function LessonPlansPage() {
                                 <label className="text-xs font-semibold uppercase text-muted-foreground">
                                   Correct Answer
                                 </label>
-                                <input
-                                  type="text"
-                                  value={editQuestionData.answer}
-                                  onChange={(e) =>
-                                    setEditQuestionData({
-                                      ...editQuestionData,
-                                      answer: e.target.value,
-                                    })
-                                  }
-                                  className="mt-1 h-8 w-full rounded-lg border border-input bg-card px-2.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-2"
-                                />
+                                {editQuestionData.options && editQuestionData.options.length > 0 ? (
+                                  <select
+                                    value={editQuestionData.answer}
+                                    onChange={(e) =>
+                                      setEditQuestionData({
+                                        ...editQuestionData,
+                                        answer: e.target.value,
+                                      })
+                                    }
+                                    className="mt-1 h-8 w-full rounded-lg border border-input bg-card px-2.5 text-xs outline-none focus-visible:border-ring font-medium"
+                                  >
+                                    {editQuestionData.options.map((opt, i) => (
+                                      <option key={i} value={opt}>
+                                        {opt}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <input
+                                    type="text"
+                                    value={editQuestionData.answer}
+                                    onChange={(e) =>
+                                      setEditQuestionData({
+                                        ...editQuestionData,
+                                        answer: e.target.value,
+                                      })
+                                    }
+                                    className="mt-1 h-8 w-full rounded-lg border border-input bg-card px-2.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-2"
+                                  />
+                                )}
                               </div>
                               <div>
                                 <label className="text-xs font-semibold uppercase text-muted-foreground">

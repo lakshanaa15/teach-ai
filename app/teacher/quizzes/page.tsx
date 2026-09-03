@@ -33,6 +33,7 @@ import { LevelBadge } from '@/components/shared/badges'
 import { AILoading } from '@/components/shared/states'
 import { useToast } from '@/components/shared/toast'
 import { exportQuizPDF } from '@/lib/export-pdf'
+import { cn } from '@/lib/utils'
 
 interface SavedQuestion {
   id: string
@@ -67,6 +68,9 @@ interface TeacherClass {
   id: string
   name: string
   classCode: string
+  subject?: string
+  academicYear?: string
+  topics?: Array<{ id: string; title: string }>
 }
 
 export default function QuizzesPage() {
@@ -103,14 +107,30 @@ export default function QuizzesPage() {
     fetchSavedQuizzes()
   }, [])
 
+  const handleSelectClass = (clsId: string) => {
+    setSelectedClassId(clsId)
+    const cls = classes.find((c) => c.id === clsId)
+    if (cls) {
+      if (cls.subject) setSubject(cls.subject)
+      if (cls.academicYear) setGrade(cls.academicYear)
+      if (cls.topics && cls.topics.length > 0) {
+        setTopic(cls.topics[0].title)
+      }
+    }
+  }
+
   const fetchTeacherClasses = async () => {
     try {
       const res = await fetch('/api/classes')
       const data = await res.json()
-      if (res.ok && data.classes) {
+      if (res.ok && data.classes && data.classes.length > 0) {
         setClasses(data.classes)
-        if (data.classes.length > 0) {
-          setSelectedClassId(data.classes[0].id)
+        const first = data.classes[0]
+        setSelectedClassId(first.id)
+        if (first.subject) setSubject(first.subject)
+        if (first.academicYear) setGrade(first.academicYear)
+        if (first.topics && first.topics.length > 0) {
+          setTopic(first.topics[0].title)
         }
       }
     } catch {
@@ -422,36 +442,63 @@ export default function QuizzesPage() {
         </CardHeader>
 
         <CardContent className="p-5 space-y-4">
+          {/* Row 1: Class, Subject, Grade, Duration */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {/* 1. Subject */}
+            {/* 1. Select Class */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Subject <span className="text-destructive">*</span>
+              <label className="text-xs font-semibold text-foreground flex items-center justify-between">
+                <span>Select Class <span className="text-primary">*</span></span>
+                <Link href="/teacher/classes" className="text-[10px] text-primary hover:underline">
+                  Manage
+                </Link>
+              </label>
+              <select
+                value={selectedClassId}
+                onChange={(e) => handleSelectClass(e.target.value)}
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
+              >
+                {classes.length === 0 ? (
+                  <option value="">No classes found (Create one first)</option>
+                ) : (
+                  classes.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.classCode})
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+
+            {/* 2. Subject (Auto-set from Class) */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground flex items-center justify-between">
+                <span>Subject</span>
+                <span className="text-[10px] text-muted-foreground font-normal">Auto-set</span>
               </label>
               <input
                 type="text"
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
                 placeholder="e.g. Database Management Systems"
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
+                className="h-9 w-full rounded-lg border border-input bg-muted/40 px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-semibold"
               />
             </div>
 
-            {/* 2. Grade */}
+            {/* 3. Grade */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-foreground">
-                Grade / Class <span className="text-destructive">*</span>
+                Year / Grade <span className="text-destructive">*</span>
               </label>
               <input
                 type="text"
                 value={grade}
                 onChange={(e) => setGrade(e.target.value)}
-                placeholder="e.g. Grade 10, Grade 12"
+                placeholder="e.g. III Year"
                 className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
               />
             </div>
 
-            {/* 3. Duration */}
+            {/* 4. Duration */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-foreground">
                 Duration <span className="text-destructive">*</span>
@@ -464,38 +511,43 @@ export default function QuizzesPage() {
                 className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
               />
             </div>
-
-            {/* 4. Curriculum/Board */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Curriculum / Board <span className="text-destructive">*</span>
-              </label>
-              <input
-                type="text"
-                value={curriculum}
-                onChange={(e) => setCurriculum(e.target.value)}
-                placeholder="e.g. CBSE, ICSE, Cambridge, ABET"
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
-              />
-            </div>
           </div>
 
+          {/* Row 2: Topic from Syllabus, No. of Questions, Curriculum */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {/* 5. Topic */}
             <div className="space-y-1.5 lg:col-span-2">
               <label className="text-xs font-semibold text-foreground">
-                Topic <span className="text-destructive">*</span>
+                Select Topic (from Class Syllabus) <span className="text-destructive">*</span>
               </label>
-              <input
-                type="text"
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                placeholder="e.g. ER Model — Entity, Attribute, Cardinality"
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
-              />
+              {(() => {
+                const currClass = classes.find((c) => c.id === selectedClassId) || classes[0]
+                const classTopics = currClass?.topics || []
+                return classTopics.length > 0 ? (
+                  <select
+                    value={topic}
+                    onChange={(e) => setTopic(e.target.value)}
+                    className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-semibold"
+                  >
+                    {classTopics.map((t) => (
+                      <option key={t.id || t.title} value={t.title}>
+                        {t.title}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={topic}
+                    onChange={(e) => setTopic(e.target.value)}
+                    placeholder="e.g. ER Model — Entity, Attribute, Cardinality"
+                    className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
+                  />
+                )
+              })()}
             </div>
 
-            {/* 6. No. of Questions (REQUIRED POSITIVE INTEGER) */}
+            {/* 6. No. of Questions */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-foreground">
                 No. of Questions <span className="text-destructive">*</span>
@@ -511,7 +563,7 @@ export default function QuizzesPage() {
             </div>
           </div>
 
-          {/* 7. Learning Objective */}
+          {/* Row 3: Learning Objective */}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-foreground">
               Learning Objective <span className="text-destructive">*</span>
@@ -520,13 +572,26 @@ export default function QuizzesPage() {
               rows={2}
               value={learningObjective}
               onChange={(e) => setLearningObjective(e.target.value)}
-              placeholder="e.g. Test understanding of 1:1, 1:N, M:N relationship cardinalities and weak entities..."
+              placeholder="e.g. Assess understanding of 1:1, 1:N, and M:N relationship cardinalities and junction table conversion..."
               className="w-full resize-none rounded-lg border border-input bg-background p-2.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-2"
             />
           </div>
 
-          {/* 8. Optional Source & Class Assignment */}
+          {/* Row 4: Curriculum & Optional Source */}
           <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                Curriculum / Board <span className="text-destructive">*</span>
+              </label>
+              <input
+                type="text"
+                value={curriculum}
+                onChange={(e) => setCurriculum(e.target.value)}
+                placeholder="e.g. Autonomous / Computer Science"
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
+              />
+            </div>
+
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-muted-foreground">
                 Optional Source / Context Notes
@@ -539,26 +604,6 @@ export default function QuizzesPage() {
                 className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2"
               />
             </div>
-
-            {classes.length > 0 && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-foreground">
-                  Publish Target Class <span className="text-primary">*</span>
-                </label>
-                <select
-                  value={selectedClassId}
-                  onChange={(e) => setSelectedClassId(e.target.value)}
-                  className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 font-medium"
-                >
-                  <option value="">-- All Enrolled Students (General) --</option>
-                  {classes.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.classCode})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
           </div>
 
           {/* Trigger Button */}
@@ -591,6 +636,58 @@ export default function QuizzesPage() {
       {/* Generated Quiz Result Display (SAME PAGE) */}
       {!isLoading && activeQuiz && (
         <div className="space-y-6 animate-in fade-in-50">
+          {/* VISUAL WORKFLOW PIPELINE: DRAFT ➔ EDIT ➔ REVIEW ➔ APPROVED ➔ PUBLISHED */}
+          <Card className="border-border bg-card p-4 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/60 pb-3 mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Quiz Publishing Lifecycle:
+                </span>
+                <Badge
+                  variant={activeQuiz.status === 'Approved' ? 'success' : editingQuestionId ? 'default' : 'warning'}
+                  className="text-[10px] uppercase font-bold"
+                >
+                  {activeQuiz.status === 'Approved' ? '✓ APPROVED & PUBLISHED' : editingQuestionId ? '✏️ IN EDIT' : '⚡ DRAFT REVIEW'}
+                </Badge>
+              </div>
+              <p className="text-xs font-medium text-muted-foreground">
+                {activeQuiz.status === 'Approved'
+                  ? '✓ This formative quiz is live for assigned classes.'
+                  : 'Review questions, options, and explanations before approving.'}
+              </p>
+            </div>
+
+            {/* Stepper Steps */}
+            <div className="grid grid-cols-5 gap-2 text-center text-xs font-semibold">
+              {[
+                { step: '1', label: 'DRAFT', done: true, desc: 'AI Generated' },
+                { step: '2', label: 'EDIT', done: editingQuestionId !== null || activeQuiz.status === 'Approved', desc: 'Customized' },
+                { step: '3', label: 'REVIEW', done: activeQuiz.status === 'Approved', desc: 'Pedagogical Check' },
+                { step: '4', label: 'APPROVED', done: activeQuiz.status === 'Approved', desc: 'Sign-Off' },
+                { step: '5', label: 'PUBLISHED', done: activeQuiz.status === 'Approved', desc: 'Live in Class' },
+              ].map((s) => (
+                <div key={s.label} className="flex flex-col items-center gap-1">
+                  <div
+                    className={cn(
+                      'flex size-7 items-center justify-center rounded-full text-xs font-bold font-mono transition-all',
+                      s.done
+                        ? 'bg-primary text-primary-foreground shadow-xs'
+                        : 'bg-muted text-muted-foreground',
+                    )}
+                  >
+                    {s.done ? '✓' : s.step}
+                  </div>
+                  <span className={cn('text-[11px]', s.done ? 'text-foreground font-bold' : 'text-muted-foreground')}>
+                    {s.label}
+                  </span>
+                  <span className="hidden md:inline text-[9px] text-muted-foreground font-normal">
+                    {s.desc}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
           {/* Action Bar */}
           <Card className="border-border bg-muted/20 p-4">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
